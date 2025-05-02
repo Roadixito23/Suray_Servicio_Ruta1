@@ -3,8 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
-import 'ComprobanteModel.dart'; // Asegúrate de importar tu modelo
+import 'ComprobanteModel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'pdf_optimizer.dart'; // Import our new optimizer
 
 class PdfGenerator {
   final double dateTimeSpacing = 5; // Espacio entre la fecha y la hora
@@ -19,17 +20,19 @@ class PdfGenerator {
       String itemName,
       ComprobanteModel comprobanteModel,
       bool isReprint) async {
-    final doc = pw.Document();
+
+    // Use our optimizer to create a lightweight document
+    final optimizer = PdfOptimizer();
+    await optimizer.preloadResources();
+    final doc = optimizer.createDocument();
 
     try {
-      // Cargar logotipo en lugar de la cabecera
-      final logoImage = await _loadImage('assets/logobkwt.png');
+      // Use cached resources
+      final logoImage = optimizer.logo;
+      final endImage = optimizer.endImage;
 
-      // Cargar la imagen de pie
-      final endImage = await _loadImage('assets/endTicket.png');
-
-      // Formatear el valor de los precios
-      final priceFormatter = NumberFormat('#,##0', 'es_CL'); // Formato chileno
+      // Formatear el valor de los precios (kept the same)
+      final priceFormatter = NumberFormat('#,##0', 'es_CL');
       String formattedPrice = priceFormatter.format(valor);
 
       // Obtener la fecha y hora actual
@@ -44,7 +47,7 @@ class PdfGenerator {
       // Obtener el número formateado de comprobante
       String ticketIdWithComprobante = comprobanteModel.formattedComprobante;
 
-      // Generar una sola página para el ticket
+      // Add a single page with optimized content
       doc.addPage(
         pw.Page(
           pageFormat: format,
@@ -53,159 +56,76 @@ class PdfGenerator {
               mainAxisAlignment: pw.MainAxisAlignment.start,
               crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                // Nueva cabecera personalizada
-                pw.Row(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    // Lado izquierdo - Logo
-                    pw.Container(
-                      width: format.width * 0.5,
-                      child: pw.Image(logoImage),
-                    ),
-                    // Lado derecho - Cuadro con borde (sin fondo)
-                    pw.Container(
-                      width: 110,
-                      height: 60, // Hacer cuadrado, ajustar según sea necesario
-                      padding: pw.EdgeInsets.all(5),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(width: 1.5), // Solo borde, sin fondo
-                        borderRadius: pw.BorderRadius.circular(2),
-                      ),
-                      child: pw.Column(
-                        mainAxisAlignment: pw.MainAxisAlignment.center, // Centrar verticalmente
-                        crossAxisAlignment: pw.CrossAxisAlignment.center,
-                        children: [
-                          pw.Text(
-                            'COMPROBANTE DE',
-                            style: pw.TextStyle(
-                              fontSize: 8,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                          pw.Text(
-                            'PAGO EN BUS',
-                            style: pw.TextStyle(
-                              fontSize: 8,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                          pw.SizedBox(height: 3),
-                          pw.Text(
-                            'N° $ticketIdWithComprobante',
-                            style: pw.TextStyle(
-                              fontSize: 14,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                // Use our optimized header component
+                PdfTicketComponents.buildHeader(logoImage, ticketIdWithComprobante),
 
                 pw.SizedBox(height: 10),
 
-                // Si es reimpresión, añadir texto de reimpresión en un recuadro
+                // Only add reprint indicator if needed (simplified)
                 if (isReprint)
-                  pw.Container(
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(),
-                      color: PdfColors.grey200,
-                    ),
-                    padding: pw.EdgeInsets.all(4),
-                    margin: pw.EdgeInsets.only(bottom: 5),
-                    child: pw.Text(
-                      'REIMPRESIÓN',
-                      style: pw.TextStyle(
-                          fontSize: 12,
-                          fontWeight: pw.FontWeight.bold,
-                          color: PdfColors.red
-                      ),
-                    ),
-                  ),
+                  PdfTicketComponents.buildReprintIndicator(),
 
-                // Título según el estado del switch
-                pw.Align(
-                  alignment: pw.Alignment.center,
-                  child: pw.Text(
-                    (nombrePasaje.toLowerCase() == 'correspondencia')
-                        ? 'COPIA DE CLIENTE'
-                        : (isSwitchOn ? 'TARIFA DOMINGO | FERIADO' : 'TARIFA LUNES A SÁBADO'),
-                    style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
-                    textAlign: pw.TextAlign.center,
-                  ),
+                // Title based on switch state (simplified)
+                pw.Text(
+                  (nombrePasaje.toLowerCase() == 'correspondencia')
+                      ? 'COPIA DE CLIENTE'
+                      : (isSwitchOn ? 'TARIFA DOMINGO | FERIADO' : 'TARIFA LUNES A SÁBADO'),
+                  style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center,
                 ),
 
-                // Mostrar nombre del pasaje
+                // Ticket name (simplified)
                 pw.SizedBox(height: 5),
-                pw.Align(
-                  alignment: pw.Alignment.center,
-                  child: pw.Text(
-                    '$nombrePasaje',
-                    style: pw.TextStyle(fontSize: 18),
-                    textAlign: pw.TextAlign.center,
-                  ),
+                pw.Text(
+                  nombrePasaje,
+                  style: pw.TextStyle(fontSize: 16),
+                  textAlign: pw.TextAlign.center,
                 ),
                 pw.SizedBox(height: 5),
 
-                // Mostrar detalles solo si es "Correspondencia"
+                // Only add correspondence details if needed (simplified)
                 if (nombrePasaje.toLowerCase() == 'correspondencia') ...[
-                  pw.Align(
-                    alignment: pw.Alignment.center,
-                    child: pw.Text(
-                      'Destinatario: $ownerName',
-                      style: pw.TextStyle(fontSize: 18),
-                    ),
+                  pw.Text(
+                    'Destinatario: $ownerName',
+                    style: pw.TextStyle(fontSize: 16),
                   ),
                   pw.SizedBox(height: 5),
-                  pw.Align(
-                    alignment: pw.Alignment.center,
-                    child: pw.Text(
-                      'Teléfono: $phoneNumber',
-                      style: pw.TextStyle(fontSize: 18),
-                    ),
+                  pw.Text(
+                    'Teléfono: $phoneNumber',
+                    style: pw.TextStyle(fontSize: 16),
                   ),
                   pw.SizedBox(height: 5),
-                  pw.Align(
-                    alignment: pw.Alignment.center,
-                    child: pw.Text(
-                      'Artículo: $itemName',
-                      style: pw.TextStyle(fontSize: 18),
-                    ),
+                  pw.Text(
+                    'Artículo: $itemName',
+                    style: pw.TextStyle(fontSize: 16),
                   ),
                   pw.SizedBox(height: 5),
                 ],
 
-                pw.Align(
-                  alignment: pw.Alignment.center,
-                  child: pw.Text(
-                    'Precio: \$${formattedPrice}',
-                    style: pw.TextStyle(fontSize: 18),
-                  ),
-                ),
+                // Price (simplified)
+                PdfTicketComponents.buildPriceDisplay(formattedPrice),
+
                 pw.SizedBox(height: 5),
                 pw.Text(
                   'Válido hora y fecha señalada',
-                  style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                  style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
                   textAlign: pw.TextAlign.center,
                 ),
+
                 pw.SizedBox(height: dateTimeSpacing),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(currentTime, style: pw.TextStyle(fontSize: 16)),
-                    pw.Text(currentDate, style: pw.TextStyle(fontSize: 16)),
-                  ],
-                ),
-                pw.Image(endImage), // Pie de página
+
+                // Date and time footer (simplified)
+                PdfTicketComponents.buildDateTimeFooter(currentDate, currentTime),
+
+                // Footer image
+                pw.Image(endImage),
+
+                // Optional reprint date
                 if (isReprint) ...[
                   pw.SizedBox(height: 5),
                   pw.Text(
                     'Fecha reimpresión: $currentDate $currentTime',
-                    style: pw.TextStyle(fontSize: 10, fontStyle: pw.FontStyle.italic),
+                    style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
                   ),
                 ],
               ],
@@ -214,20 +134,14 @@ class PdfGenerator {
         ),
       );
 
-      return doc.save(); // Devuelve el PDF generado
+      // Generate and return the PDF bytes
+      return await doc.save();
+
     } catch (e) {
       print('Error generando PDF: $e');
-      throw e; // Re-lanza el error para que pueda ser manejado por el llamador
-    }
-  }
-
-  Future<pw.ImageProvider> _loadImage(String path) async {
-    try {
-      final ByteData bytes = await rootBundle.load(path);
-      final Uint8List list = bytes.buffer.asUint8List();
-      return pw.MemoryImage(list);
-    } catch (e) {
-      throw Exception('Error loading image: $e');
+      // In case of error, clear the cache to free memory
+      optimizer.clearCache();
+      throw e;
     }
   }
 }

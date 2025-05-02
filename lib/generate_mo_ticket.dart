@@ -7,16 +7,33 @@ import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'ComprobanteModel.dart'; // Asegúrate de importar tu modelo
+import 'ComprobanteModel.dart';
+import 'pdf_optimizer.dart'; // Import our optimizer
 
 class MoTicketGenerator {
+  // Use our optimizer
+  final PdfOptimizer _optimizer = PdfOptimizer();
+  bool _resourcesLoaded = false;
+
+  // Preload resources method
+  Future<void> _ensureResourcesLoaded() async {
+    if (!_resourcesLoaded) {
+      await _optimizer.preloadResources();
+      _resourcesLoaded = true;
+    }
+  }
+
   Future<void> generateMoTicket(
       PdfPageFormat format,
       List<Map<String, dynamic>> offerEntries,
       bool isSwitchOn,
       BuildContext context,
       Function(String, double, List<double>, String) onGenerateComplete) async {
+
     final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
+
+    // Preload PDF resources
+    await _ensureResourcesLoaded();
 
     // Incrementar y obtener el número de comprobante antes de crear el PDF
     await comprobanteModel.incrementComprobante();
@@ -26,6 +43,7 @@ class MoTicketGenerator {
     double total = 0.0;
     List<double> subtotals = [];
 
+    // Simplified calculation
     for (var entry in offerEntries) {
       int quantity = int.tryParse(entry['number'] ?? '0') ?? 0;
       double price = double.tryParse(entry['value'] ?? '0.0') ?? 0.0;
@@ -35,28 +53,36 @@ class MoTicketGenerator {
       subtotals.add(subtotal);
     }
 
-    // Crear y guardar el PDF
-    final Uint8List pdfData = await _generateTicketPdf(
-        offerEntries,
-        comprobante,
-        isSwitchOn,
-        false, // No es reimpresión
-        subtotals,
-        total
-    );
+    try {
+      // Crear y guardar el PDF
+      final Uint8List pdfData = await _generateTicketPdf(
+          offerEntries,
+          comprobante,
+          isSwitchOn,
+          false, // No es reimpresión
+          subtotals,
+          total
+      );
 
-    // Imprimir el PDF
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdfData,
-      format: PdfPageFormat(58 * PdfPageFormat.mm, double.infinity), // Usar formato de 58mm
-    );
+      // Imprimir el PDF
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdfData,
+        format: PdfPageFormat(58 * PdfPageFormat.mm, double.infinity), // Usar formato de 58mm
+      );
 
-    // Guardar el número de comprobante en SharedPreferences
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('comprobanteNumber', comprobanteModel.comprobanteNumber);
+      // Guardar el número de comprobante en SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('comprobanteNumber', comprobanteModel.comprobanteNumber);
 
-    // Llamar al callback con el nombre del pasaje, el valor total, los subtotales y el número de comprobante
-    onGenerateComplete('Oferta Ruta', total, subtotals, comprobante);
+      // Llamar al callback con los datos relevantes
+      onGenerateComplete('Oferta Ruta', total, subtotals, comprobante);
+
+    } catch (e) {
+      print('Error generating MO ticket: $e');
+      // Clear resources on error
+      _optimizer.clearCache();
+      throw e;
+    }
   }
 
   // Método de reimpresión mejorado
@@ -66,8 +92,12 @@ class MoTicketGenerator {
       bool isSwitchOn,
       BuildContext context,
       String comprobante) async {
+
+    // Preload PDF resources
+    await _ensureResourcesLoaded();
+
     try {
-      // Calcular subtotales y total
+      // Calcular subtotales y total (simplified)
       double total = 0.0;
       List<double> subtotals = [];
 
@@ -80,7 +110,7 @@ class MoTicketGenerator {
         subtotals.add(subtotal);
       }
 
-      // Crear el PDF para reimpresión
+      // Generate PDF for reprint
       final Uint8List pdfData = await _generateTicketPdf(
           offerEntries,
           comprobante,
@@ -90,14 +120,17 @@ class MoTicketGenerator {
           total
       );
 
-      // Imprimir el PDF
+      // Print it
       await Printing.layoutPdf(
         onLayout: (PdfPageFormat format) async => pdfData,
         format: PdfPageFormat(58 * PdfPageFormat.mm, double.infinity), // Usar formato de 58mm
       );
+
     } catch (e) {
       print('Error en reprintMoTicket: $e');
-      throw e; // Re-lanzar el error para manejarlo en la capa superior
+      // Clear resources on error
+      _optimizer.clearCache();
+      throw e;
     }
   }
 
@@ -109,16 +142,18 @@ class MoTicketGenerator {
       bool isReprint,
       List<double> subtotals,
       double total) async {
-    final doc = pw.Document();
-    final pdfWidth = 58 * PdfPageFormat.mm;
 
-    // Cargar imágenes
-    final logoImage = await _loadImage('assets/logobkwt.png'); // Cambio: usar logo en lugar de headImage
-    final endImage = await _loadImage('assets/endTicket.png');
+    // Use our optimized document
+    final doc = _optimizer.createDocument();
+    final pdfWidth = 58 * PdfPageFormat.mm;
 
     // Obtener la fecha y hora actual
     String currentDate = DateFormat('dd/MM/yyyy').format(DateTime.now());
     String currentTime = DateFormat('HH:mm:ss').format(DateTime.now());
+
+    // Use NumberFormat just once
+    final formatter = NumberFormat('#,##0', 'es_CL');
+    final formattedTotal = formatter.format(total);
 
     // Crear la página del PDF con formato para rollo de 58mm
     doc.addPage(
@@ -129,165 +164,65 @@ class MoTicketGenerator {
             mainAxisAlignment: pw.MainAxisAlignment.start,
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
-              // Nueva cabecera personalizada
-              pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  // Lado izquierdo - Logo
-                  pw.Container(
-                    width: pdfWidth * 0.5,
-                    child: pw.Image(logoImage),
-                  ),
-                  // Lado derecho - Cuadro con borde (sin fondo)
-                  pw.Container(
-                    width: 85,
-                    height: 40, // Hacer cuadrado, ajustar según sea necesario
-                    padding: pw.EdgeInsets.all(5),
-                    decoration: pw.BoxDecoration(
-                      border: pw.Border.all(width: 1.5), // Solo borde, sin fondo
-                      borderRadius: pw.BorderRadius.circular(2),
-                    ),
-                    child: pw.Column(
-                      mainAxisAlignment: pw.MainAxisAlignment.center, // Centrar verticalmente
-                      crossAxisAlignment: pw.CrossAxisAlignment.center,
-                      children: [
-                        pw.Text(
-                          'COMPROBANTE DE',
-                          style: pw.TextStyle(
-                            fontSize: 6,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                          textAlign: pw.TextAlign.center,
-                        ),
-                        pw.Text(
-                          'PAGO EN BUS',
-                          style: pw.TextStyle(
-                            fontSize: 6,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                          textAlign: pw.TextAlign.center,
-                        ),
-                        pw.SizedBox(height: 3),
-                        pw.Text(
-                          'N° $comprobante',
-                          style: pw.TextStyle(
-                            fontSize: 8,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                          textAlign: pw.TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+              // Use our optimized header component
+              PdfTicketComponents.buildHeader(_optimizer.logo, comprobante),
 
               pw.SizedBox(height: 5),
 
-              // Si es reimpresión, añadir recuadro indicativo
+              // Add reprint indicator if needed
               if (isReprint)
-                pw.Container(
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(),
-                    color: PdfColors.grey200,
-                  ),
-                  padding: pw.EdgeInsets.all(2),
-                  margin: pw.EdgeInsets.only(bottom: 5),
-                  child: pw.Text(
-                    'REIMPRESIÓN',
-                    style: pw.TextStyle(
-                        fontSize: 10,
-                        fontWeight: pw.FontWeight.bold,
-                        color: PdfColors.red
-                    ),
-                    textAlign: pw.TextAlign.center,
-                  ),
-                ),
+                PdfTicketComponents.buildReprintIndicator(),
 
-              // Título de Oferta en Ruta (ahora debajo del comprobante)
+              // Simplified title
               pw.Text('Oferta en Ruta',
                 style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
                 textAlign: pw.TextAlign.center,
               ),
               pw.SizedBox(height: 5),
 
-              // Tabla para mostrar subtotales (adaptada para ancho de 58mm)
-              pw.Table(
-                border: pw.TableBorder.all(),
-                columnWidths: {
-                  0: pw.FlexColumnWidth(0.8),  // Columna cantidad más pequeña
-                  1: pw.FlexColumnWidth(1.2),  // Columna precio
-                  2: pw.FlexColumnWidth(1.5),  // Columna subtotal
-                },
-                children: [
-                  pw.TableRow(
-                    children: [
-                      pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text('Cant', style: pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.center)),
-                      pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text('Precio', style: pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.center)),
-                      pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text('Subtotal', style: pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.center)),
-                    ],
-                  ),
-                  ...offerEntries.map((entry) {
-                    int quantity = int.tryParse(entry['number'] ?? '0') ?? 0;
-                    double price = double.tryParse(entry['value'] ?? '0.0') ?? 0.0;
-                    double subtotal = quantity * price;
-
-                    return pw.TableRow(
-                      children: [
-                        pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text(quantity.toString(), style: pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.center)),
-                        pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text('\$${NumberFormat('#,##0', 'es_CL').format(price)}', style: pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.right)),
-                        pw.Padding(padding: const pw.EdgeInsets.all(2), child: pw.Text('\$${NumberFormat('#,##0', 'es_CL').format(subtotal)}', style: pw.TextStyle(fontSize: 8), textAlign: pw.TextAlign.right)),
-                      ],
-                    );
-                  }).toList(),
-                ],
-              ),
+              // Simplified table using our components
+              PdfTicketComponents.buildSimplifiedTable(offerEntries),
 
               pw.SizedBox(height: 5),
-              pw.Text('Total: \$${NumberFormat('#,##0', 'es_CL').format(total)}',
+
+              // Total amount
+              pw.Text('Total: \$$formattedTotal',
                 style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
                 textAlign: pw.TextAlign.center,
               ),
+
               pw.SizedBox(height: 5),
+
+              // Validity text
               pw.Text('Válido hora y fecha señalada',
                 style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
                 textAlign: pw.TextAlign.center,
               ),
+
               pw.SizedBox(height: 3),
 
-              // Mostrar fecha y hora en la misma línea con separación
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.center,
-                children: [
-                  pw.Text('$currentTime', style: pw.TextStyle(fontSize: 12)),
-                  pw.SizedBox(width: 30), // Separación en medio
-                  pw.Text('$currentDate', style: pw.TextStyle(fontSize: 12)),
-                ],
-              ),
+              // Date and time
+              PdfTicketComponents.buildDateTimeFooter(currentDate, currentTime),
 
-              // Si es reimpresión, añadir fecha de reimpresión
+              // Add reprint date if needed
               if (isReprint) ...[
                 pw.SizedBox(height: 5),
                 pw.Text(
-                  'Reimpreso: ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}',
+                  'Reimpreso: $currentDate $currentTime',
                   style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
                   textAlign: pw.TextAlign.center,
                 ),
               ],
 
-              pw.Image(endImage),
+              // Footer image
+              pw.Image(_optimizer.endImage),
             ],
           );
         },
       ),
     );
 
-    // Guardar y devolver el PDF
+    // Save and return the PDF
     return await doc.save();
-  }
-
-  Future<pw.ImageProvider> _loadImage(String path) async {
-    final ByteData bytes = await rootBundle.load(path);
-    return pw.MemoryImage(bytes.buffer.asUint8List());
   }
 }

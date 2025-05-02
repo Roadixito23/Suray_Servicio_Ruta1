@@ -254,7 +254,7 @@ class BackupService {
     }
   }
 
-  // Método auxiliar para obtener todas las SharedPreferences
+  // Metodo auxiliar para obtener todas las SharedPreferences
   static Future<Map<String, dynamic>> _getAllSharedPreferences(SharedPreferences prefs) async {
     final prefsMap = <String, dynamic>{};
 
@@ -296,7 +296,7 @@ class BackupService {
     return prefsMap;
   }
 
-  // Método auxiliar para restaurar SharedPreferences
+  // Metodo auxiliar para restaurar SharedPreferences
   static Future<void> _restoreSharedPreferences(Map<String, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -339,7 +339,7 @@ class BackupService {
     }
   }
 
-  // Método auxiliar para crear archivo desde directorio
+  // Metodo auxiliar para crear archivo desde directorio
   static Future<List<int>> _createArchiveFromDirectory(Directory dir) async {
     final archive = Archive();
     final files = await dir.list(recursive: true).toList();
@@ -357,7 +357,7 @@ class BackupService {
     return ZipEncoder().encode(archive)!;
   }
 
-  // Método auxiliar para extraer archivo
+  // Metodo auxiliar para extraer archivo
   static Future<void> _extractArchive(File zipFile, Directory targetDir) async {
     final bytes = await zipFile.readAsBytes();
     final archive = ZipDecoder().decodeBytes(bytes);
@@ -374,7 +374,7 @@ class BackupService {
     }
   }
 
-  // Método auxiliar para copiar directorio recursivamente
+  // Metodo auxiliar para copiar directorio recursivamente
   static Future<void> _copyDirectory(String source, String target) async {
     final sourceDir = Directory(source);
     final targetDir = Directory(target);
@@ -398,7 +398,7 @@ class BackupService {
     }
   }
 
-  // Método auxiliar para obtener archivos PDF
+  // Metodo auxiliar para obtener archivos PDF
   static Future<List<File>> _getPdfFiles(Directory dir) async {
     final files = <File>[];
     final entities = await dir.list(recursive: false).toList();

@@ -4,11 +4,23 @@ import 'ComprobanteModel.dart';
 import 'ticket_model.dart';
 import 'sunday_ticket_model.dart';
 import 'home.dart';
-import 'ReporteCaja.dart'; // Asegúrate de importar el archivo
-import 'splash.dart'; // Importar el splash screen
+import 'ReporteCaja.dart';
+import 'splash.dart';
+import 'pdf_optimizer.dart'; // Import our PDF optimizer
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Preload PDF resources on app startup to make ticket generation faster
+  final pdfOptimizer = PdfOptimizer();
+  try {
+    // Try to preload resources during app startup
+    await pdfOptimizer.preloadResources();
+    print('PDF resources preloaded successfully');
+  } catch (e) {
+    print('Failed to preload PDF resources: $e');
+    // We'll try again when needed, so continue with app startup
+  }
 
   runApp(
     MultiProvider(
@@ -30,7 +42,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Suray',
-      home: SplashScreen(), // Iniciar con el splash screen en lugar de Home
+      home: SplashScreen(),
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: Colors.amber[800],

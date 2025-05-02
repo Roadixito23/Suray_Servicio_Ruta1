@@ -17,6 +17,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'generate_mo_ticket.dart';
 import 'ComprobanteModel.dart';
+import 'pdf_optimizer.dart';
 
 
 class Home extends StatefulWidget {
@@ -25,6 +26,7 @@ class Home extends StatefulWidget {
 }
 
 class _HomeState extends State<Home> {
+  final PdfOptimizer pdfOptimizer = PdfOptimizer(); // Add PDF optimizer
   final GenerateTicket generateTicket = GenerateTicket();
   final MoTicketGenerator moTicketGenerator = MoTicketGenerator();
   bool _isButtonDisabled = false;
@@ -35,9 +37,7 @@ class _HomeState extends State<Home> {
   bool _hasReprinted = false;
   bool _hasAnulado = false;
   bool _isPhoneMode = true;
-  bool _isOfficeMode = false;
-  double _emergencyButtonWidth = 120.0;
-  double _emergencyButtonHeight = 40.0;
+  bool _resourcesPreloaded = false; // Track if resources are preloaded
   final TextEditingController _offerController = TextEditingController();
   final TextEditingController _ownerController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
@@ -108,7 +108,7 @@ class _HomeState extends State<Home> {
       _updateDay();
     });
     _isPhoneMode = true;
-
+    _preloadPdfResources();
     _loadLastTransaction();
     _loadDisplayPreferences();
     _loadIconSettings();
@@ -2411,5 +2411,24 @@ class _HomeState extends State<Home> {
         ),
       ),
     );
+  }
+
+  Future<void> _preloadPdfResources() async {
+    try {
+      if (!_resourcesPreloaded) {
+        await pdfOptimizer.preloadResources();
+        await generateTicket.preloadResources();
+        // Also preload resources for cargo ticket if present in the UI
+        final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+        final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
+        final cargoGen = CargoTicketGenerator(comprobanteModel, reporteCaja);
+        await cargoGen.preloadResources();
+
+        _resourcesPreloaded = true;
+      }
+    } catch (e) {
+      print('Error preloading PDF resources: $e');
+      // We'll try again when needed
+    }
   }
 }
