@@ -55,8 +55,7 @@ class PdfGenerator {
               mainAxisAlignment: pw.MainAxisAlignment.start,
               crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                // Reemplazar el método buildHeader con una versión personalizada
-                // donde el comprobante está alineado a la derecha
+                // Logo y comprobante (usando directamente el método del componente)
                 pw.Row(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
@@ -102,9 +101,9 @@ class PdfGenerator {
 
                 pw.SizedBox(height: 10),
 
-                // Only add reprint indicator if needed (simplified)
+                // Only add reprint indicator if needed
                 if (isReprint)
-                  PdfTicketComponents.buildHeader(logoImage,comprobanteModel as String),
+                  PdfTicketComponents.buildReprintIndicator(),
 
                 // Title based on switch state (simplified)
                 pw.Text(

@@ -49,21 +49,23 @@ class GenerateTicket {
       await preloadResources();
     }
 
-    final now       = DateTime.now();
-    final priceFmt  = NumberFormat('#,###', 'es_CL');
+    final now = DateTime.now();
+    final priceFmt = NumberFormat('#,###', 'es_CL');
     final formatted = priceFmt.format(valor);
 
     final doc = optimizer.createDocument();
 
+    // Solo incrementa el comprobante si no es reimpresión
     if (!isReprint) {
       await comprobanteModel.incrementComprobante();
     }
+
     final ticketId = comprobanteModel.formattedComprobante;
 
     doc.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.roll80,
-        build: (pw.Context _) {
+        build: (pw.Context context) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
@@ -75,7 +77,25 @@ class GenerateTicket {
               ),
               pw.SizedBox(height: 10),
 
-              // Tipo de ticket
+              // Indicador de reimpresión si aplica
+              if (isReprint)
+                pw.Container(
+                  padding: pw.EdgeInsets.symmetric(vertical: 2, horizontal: 5),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(width: 1, color: PdfColors.black),
+                    color: PdfColors.grey200,
+                  ),
+                  child: pw.Text(
+                    'REIMPRESIÓN',
+                    style: pw.TextStyle(
+                      fontSize: 10,
+                      fontWeight: pw.FontWeight.bold,
+                      fontStyle: pw.FontStyle.italic,
+                    ),
+                  ),
+                ),
+
+              // Tipo de ticket y título
               pw.Text(
                 tipo,
                 style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
@@ -84,7 +104,15 @@ class GenerateTicket {
               pw.SizedBox(height: 5),
 
               // Valor
-              pw.Text('Valor: \$${formatted}', style: pw.TextStyle(fontSize: 14)),
+              pw.Container(
+                padding: pw.EdgeInsets.symmetric(vertical: 5, horizontal: 10),
+                decoration: pw.BoxDecoration(border: pw.Border.all(width: 1)),
+                child: pw.Text(
+                  '\$${formatted}',
+                  style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
+                  textAlign: pw.TextAlign.center,
+                ),
+              ),
               pw.SizedBox(height: 5),
 
               // Cliente y contacto
@@ -105,10 +133,19 @@ class GenerateTicket {
               pw.SizedBox(height: 5),
 
               // Fecha y hora
-              pw.Text(
-                'Fecha: ${DateFormat('dd/MM/yyyy').format(now)}  Hora: ${DateFormat('HH:mm:ss').format(now)}',
-                style: pw.TextStyle(fontSize: 10),
-                textAlign: pw.TextAlign.center,
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.center,
+                children: [
+                  pw.Text(
+                    'Fecha: ${DateFormat('dd/MM/yyyy').format(now)}',
+                    style: pw.TextStyle(fontSize: 8),
+                  ),
+                  pw.SizedBox(width: 10),
+                  pw.Text(
+                    'Hora: ${DateFormat('HH:mm:ss').format(now)}',
+                    style: pw.TextStyle(fontSize: 8),
+                  ),
+                ],
               ),
               pw.SizedBox(height: 10),
 

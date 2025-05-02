@@ -18,7 +18,7 @@ class PdfResourceManager {
       'assets/logobkwt.png',
       'assets/headTicket.png',
       'assets/endTicket.png',
-      'assets/tijeras.png',
+      'assets/tijera.png',
     ];
     for (final path in paths) {
       final data = await rootBundle.load(path);
