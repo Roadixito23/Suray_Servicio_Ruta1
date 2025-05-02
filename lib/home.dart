@@ -104,15 +104,86 @@ class _HomeState extends State<Home> {
     super.initState();
     _initializeLocalization();
     _updateDay();
-    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _timer = Timer.periodic(Duration(milliseconds: 250), (timer) {
       _updateDay();
     });
     _isPhoneMode = true;
-    _preloadPdfResources();
+
+    // Iniciar precarga de recursos inmediatamente y en segundo plano
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // Usar un try-catch para evitar que errores de precarga afecten la experiencia del usuario
+      try {
+        await _preloadPdfResourcesAsync();
+      } catch (e) {
+        print('Error en precarga de recursos: $e');
+        // No mostramos el error al usuario para no afectar la experiencia
+      }
+    });
+
     _loadLastTransaction();
     _loadDisplayPreferences();
     _loadIconSettings();
     _loadAppBarConfig();
+  }
+
+// Nueva función para precargar recursos de manera asíncrona
+  Future<void> _preloadPdfResourcesAsync() async {
+    if (_resourcesPreloaded) return; // Evitar cargar múltiples veces
+
+    print('Iniciando precarga de recursos en segundo plano...');
+
+    // Crear completers para cada recurso a cargar
+    final completer = Completer<void>();
+
+    // Ejecutar en un microtask para evitar bloquear la UI
+    Future.microtask(() async {
+      try {
+        // Precargar los recursos del PDF
+        await pdfOptimizer.preloadResources();
+        await generateTicket.preloadResources();
+
+        // Precargar recursos para tickets de cargo si están disponibles
+        try {
+          final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+          final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
+          final cargoGen = CargoTicketGenerator(comprobanteModel, reporteCaja);
+          await cargoGen.preloadResources();
+        } catch (e) {
+          // Si hay un error al precargar recursos de cargo, no afecta la funcionalidad principal
+          print('Advertencia: No se pudieron precargar recursos de cargo: $e');
+        }
+
+        // Marcar como completado
+        setState(() {
+          _resourcesPreloaded = true;
+        });
+
+        completer.complete();
+        print('Precarga de recursos completada con éxito');
+      } catch (e) {
+        completer.completeError(e);
+        print('Error durante la precarga de recursos: $e');
+      }
+    });
+
+    return completer.future;
+  }
+
+// Modificar el método existente para verificar primero si ya está cargado
+  Future<void> _preloadPdfResources() async {
+    if (_resourcesPreloaded) {
+      print('Recursos ya precargados, no es necesario cargar nuevamente');
+      return;
+    }
+
+    // Si no está precargado, intentar cargar normalmente
+    try {
+      await _preloadPdfResourcesAsync();
+    } catch (e) {
+      print('Error al cargar recursos: $e');
+      // Intentaremos nuevamente cuando sea necesario
+      _resourcesPreloaded = false;
+    }
   }
 
   @override
@@ -531,10 +602,30 @@ class _HomeState extends State<Home> {
 
     setState(() {
       _hasReprinted = false;
-      _hasAnulado   = false;
+      _hasAnulado = false;
       _isButtonDisabled = true;
       _isLoading = true;
     });
+
+    // Show a SnackBar with shorter duration (2 seconds instead of 5)
+    final snackBar = SnackBar(
+      content: Row(
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          ),
+          SizedBox(width: 10),
+          Text('Generando ticket de $tipo...'),
+        ],
+      ),
+      duration: Duration(seconds: 2), // Reduced from 5 seconds
+    );
+    ScaffoldMessenger.of(context).showSnackBar(snackBar);
 
     try {
       final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
@@ -549,6 +640,8 @@ class _HomeState extends State<Home> {
           comprobanteModel,
           false
       );
+
+      // Update the latest transaction
       setState(() {
         _lastTransaction = {
           'nombre': tipo,
@@ -557,8 +650,25 @@ class _HomeState extends State<Home> {
           'comprobante': comprobanteModel.formattedComprobante,
         };
       });
+
+      // Show success confirmation
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ticket generado correctamente'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 1),
+          )
+      );
     } catch (e) {
       print('Error generando ticket: $e');
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al generar ticket'),
+            backgroundColor: Colors.red,
+          )
+      );
     } finally {
       setState(() {
         _isButtonDisabled = false;
@@ -1253,11 +1363,17 @@ class _HomeState extends State<Home> {
     }
   }
 
+// Método para mostrar diálogo de oferta múltiple (modificado con actualización de total en tiempo real)
   Future<void> _showMultiOfferDialog() async {
     // 1) Bloquear si hay transacciones del día anterior
     if (_hasPreviousDayTransactions()) {
       await _showPreviousDayAlert();
       return;
+    }
+
+    // Asegurar que los recursos estén precargados
+    if (!_resourcesPreloaded) {
+      await _preloadPdfResources();
     }
 
     final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
@@ -1273,6 +1389,19 @@ class _HomeState extends State<Home> {
       }
     ];
 
+    // Variable para guardar el valor total actual
+    double currentTotal = 0.0;
+
+
+    // Función para calcular el total actual basado en entradas
+    double calculateTotal(List<Map<String, dynamic>> entries) {
+      return entries.fold(0.0, (sum, e) {
+        final qty = double.tryParse(e['numberController'].text) ?? 0;
+        final val = double.tryParse(e['valueController'].text) ?? 0;
+        return sum + qty * val;
+      });
+    }
+
     await showGeneralDialog(
       context: context,
       barrierDismissible: false,
@@ -1283,12 +1412,37 @@ class _HomeState extends State<Home> {
           builder: (BuildContext dialogContext, StateSetter dialogSetState) {
             bool isLoading = false;
 
-            // Calcula el total en cada rebuild
-            double currentTotal = offerEntries.fold(0.0, (sum, e) {
-              final qty = double.tryParse(e['numberController'].text) ?? 0;
-              final val = double.tryParse(e['valueController'].text) ?? 0;
-              return sum + qty * val;
-            });
+            // Configura los listeners de texto para actualizar el total en tiempo real
+            void setupControllerListeners() {
+              for (var entry in offerEntries) {
+                // Add null checks before calling methods
+                final numberController = entry['numberController'] as TextEditingController?;
+                final valueController = entry['valueController'] as TextEditingController?;
+
+                if (numberController != null) {
+                  numberController.removeListener(() {});
+                  numberController.addListener(() {
+                    dialogSetState(() {
+                      currentTotal = calculateTotal(offerEntries);
+                    });
+                  });
+                }
+
+                if (valueController != null) {
+                  valueController.removeListener(() {});
+                  valueController.addListener(() {
+                    dialogSetState(() {
+                      currentTotal = calculateTotal(offerEntries);
+                    });
+                  });
+                }
+              }
+            }
+
+            // Configurar listeners para la primera entrada al inicio
+            if (currentTotal == 0.0) {
+              setupControllerListeners();
+            }
 
             Future<void> _submitAndPrint() async {
               dialogSetState(() => isLoading = true);
@@ -1298,11 +1452,21 @@ class _HomeState extends State<Home> {
                 _isButtonDisabled = true;
                 _isLoading = true;
               });
+
               try {
+                // Mostrar feedback al usuario
+                ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Generando oferta...'),
+                      duration: Duration(milliseconds: 800),
+                    )
+                );
+
                 final entriesForTicket = offerEntries.map((e) => {
                   'number': e['numberController'].text,
                   'value': e['valueController'].text,
                 }).toList();
+
                 await moTicketGenerator.generateMoTicket(
                   PdfPageFormat.standard,
                   entriesForTicket,
@@ -1325,11 +1489,24 @@ class _HomeState extends State<Home> {
                     });
                   },
                 );
+
+                // Mostrar mensaje de éxito
+                ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Oferta generada correctamente'),
+                      backgroundColor: Colors.green,
+                    )
+                );
               } catch (e) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error al imprimir: $e'), backgroundColor: Colors.red),
+                    SnackBar(
+                        content: Text('Error al imprimir: $e'),
+                        backgroundColor: Colors.red
+                    ),
                   );
+                  // Liberar recursos en caso de error
+                  _clearCacheIfNeeded();
                 }
               } finally {
                 if (!mounted) return;
@@ -1340,6 +1517,7 @@ class _HomeState extends State<Home> {
               }
             }
 
+            // UI del diálogo con actualización en tiempo real
             return Scaffold(
               backgroundColor: Colors.white,
               appBar: AppBar(
@@ -1373,6 +1551,12 @@ class _HomeState extends State<Home> {
                                     border: OutlineInputBorder(),
                                   ),
                                   keyboardType: TextInputType.number,
+                                  onChanged: (_) {
+                                    // Asegurar que la actualización ocurra inmediatamente
+                                    dialogSetState(() {
+                                      currentTotal = calculateTotal(offerEntries);
+                                    });
+                                  },
                                 ),
                               ),
                               SizedBox(width: 8),
@@ -1386,13 +1570,23 @@ class _HomeState extends State<Home> {
                                     border: OutlineInputBorder(),
                                   ),
                                   keyboardType: TextInputType.number,
+                                  onChanged: (_) {
+                                    // Asegurar que la actualización ocurra inmediatamente
+                                    dialogSetState(() {
+                                      currentTotal = calculateTotal(offerEntries);
+                                    });
+                                  },
                                 ),
                               ),
                               if (offerEntries.length > 1) ...[
                                 IconButton(
                                   icon: Icon(Icons.remove_circle, color: Colors.red),
                                   onPressed: () {
-                                    dialogSetState(() => offerEntries.removeAt(i));
+                                    dialogSetState(() {
+                                      offerEntries.removeAt(i);
+                                      // Recalcular total después de eliminar una línea
+                                      currentTotal = calculateTotal(offerEntries);
+                                    });
                                   },
                                 )
                               ]
@@ -1402,14 +1596,34 @@ class _HomeState extends State<Home> {
                       ),
                     ),
                     SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Text('Total:',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                        Spacer(),
-                        Text('\$${decimalFormatter.format(currentTotal)}',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      ],
+                    Container(
+                      padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                              'Total:',
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade800
+                              )
+                          ),
+                          Spacer(),
+                          Text(
+                              '\$${decimalFormatter.format(currentTotal)}',
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.amber.shade800
+                              )
+                          ),
+                        ],
+                      ),
                     ),
                     SizedBox(height: 16),
                     if (!isLoading)
@@ -1418,24 +1632,61 @@ class _HomeState extends State<Home> {
                         children: [
                           ElevatedButton.icon(
                             onPressed: () {
-                              dialogSetState(() => offerEntries.add({
-                                'numberController': TextEditingController(),
-                                'valueController': TextEditingController(),
-                                'numberFocus': FocusNode(),
-                                'valueFocus': FocusNode(),
-                              }));
+                              dialogSetState(() {
+                                // Agregar nueva línea
+                                final newEntry = {
+                                  'numberController': TextEditingController(),
+                                  'valueController': TextEditingController(),
+                                  'numberFocus': FocusNode(),
+                                  'valueFocus': FocusNode(),
+                                };
+                                offerEntries.add(newEntry);
+
+                                // Configurar listeners para la nueva entrada con verificación de nulidad
+                                final newNumberController = newEntry['numberController'] as TextEditingController?;
+                                final newValueController = newEntry['valueController'] as TextEditingController?;
+
+                                if (newNumberController != null) {
+                                  newNumberController.addListener(() {
+                                    dialogSetState(() {
+                                      currentTotal = calculateTotal(offerEntries);
+                                    });
+                                  });
+                                }
+
+                                if (newValueController != null) {
+                                  newValueController.addListener(() {
+                                    dialogSetState(() {
+                                      currentTotal = calculateTotal(offerEntries);
+                                    });
+                                  });
+                                }
+                              });
                             },
                             icon: Icon(Icons.add),
                             label: Text('Agregar línea'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              foregroundColor: Colors.white,
+                            ),
                           ),
-                          ElevatedButton(
+                          ElevatedButton.icon(
                             onPressed: _submitAndPrint,
-                            child: Text('Imprimir'),
+                            icon: Icon(Icons.print),
+                            label: Text('Imprimir'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.amber.shade800,
+                              foregroundColor: Colors.white,
+                            ),
                           ),
                         ],
                       )
                     else
-                      CircularProgressIndicator(),
+                      Center(
+                          child: CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.amber.shade800),
+                          )
+                      ),
                   ],
                 ),
               ),
@@ -1712,7 +1963,6 @@ class _HomeState extends State<Home> {
     required Color borderColor,
     required Function() onPressed,
     bool isDisabled = false,
-    bool isLoading = false,
     Color textColor = Colors.white,
   }) {
     double screenWidth = MediaQuery.of(context).size.width;
@@ -1726,7 +1976,7 @@ class _HomeState extends State<Home> {
         minHeight: 60,
       ),
       child: ElevatedButton(
-        onPressed: isDisabled || isLoading ? null : onPressed,
+        onPressed: isDisabled ? null : onPressed,
         style: ElevatedButton.styleFrom(
           backgroundColor: backgroundColor,
           side: BorderSide(
@@ -1740,9 +1990,7 @@ class _HomeState extends State<Home> {
           disabledBackgroundColor: Colors.grey,
           padding: EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         ),
-        child: isLoading
-            ? CircularProgressIndicator(color: Colors.white)
-            : _showIcons
+        child: _showIcons
             ? Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -2258,7 +2506,6 @@ class _HomeState extends State<Home> {
                       _generateTicket(pasajes[0]['nombre'], pasajes[0]['precio'], false);
                     },
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
 
@@ -2274,7 +2521,6 @@ class _HomeState extends State<Home> {
                       _generateTicket(pasajes[4]['nombre'], pasajes[4]['precio'], false);
                     },
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
               ],
@@ -2297,7 +2543,6 @@ class _HomeState extends State<Home> {
                       _generateTicket(pasajes[1]['nombre'], pasajes[1]['precio'], false);
                     },
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
 
@@ -2313,7 +2558,6 @@ class _HomeState extends State<Home> {
                       _generateTicket(pasajes[3]['nombre'], pasajes[3]['precio'], false);
                     },
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
               ],
@@ -2336,7 +2580,6 @@ class _HomeState extends State<Home> {
                       _generateTicket(pasajes[2]['nombre'], pasajes[2]['precio'], false);
                     },
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
 
@@ -2365,7 +2608,6 @@ class _HomeState extends State<Home> {
                       }
                     },
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
               ],
@@ -2387,7 +2629,6 @@ class _HomeState extends State<Home> {
                     textColor: Colors.yellow,
                     onPressed: _showMultiOfferDialog,
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
 
@@ -2401,7 +2642,6 @@ class _HomeState extends State<Home> {
                     borderColor: Colors.black,
                     onPressed: _showOfferDialog,
                     isDisabled: _isButtonDisabled,
-                    isLoading: _isLoading,
                   ),
                 ),
               ],
@@ -2413,22 +2653,15 @@ class _HomeState extends State<Home> {
     );
   }
 
-  Future<void> _preloadPdfResources() async {
-    try {
-      if (!_resourcesPreloaded) {
-        await pdfOptimizer.preloadResources();
-        await generateTicket.preloadResources();
-        // Also preload resources for cargo ticket if present in the UI
-        final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
-        final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
-        final cargoGen = CargoTicketGenerator(comprobanteModel, reporteCaja);
-        await cargoGen.preloadResources();
+  void _clearCacheIfNeeded() {
+    print('Liberando memoria para PDF...');
+    pdfOptimizer.clearCache();
+    _resourcesPreloaded = false;
 
-        _resourcesPreloaded = true;
-      }
-    } catch (e) {
-      print('Error preloading PDF resources: $e');
-      // We'll try again when needed
+    // También podemos liberar otras cachés si es necesario
+    if (generateTicket.resourcesPreloaded) {
+      generateTicket.optimizer.clearCache();
+      generateTicket.resourcesPreloaded = false;
     }
   }
 }

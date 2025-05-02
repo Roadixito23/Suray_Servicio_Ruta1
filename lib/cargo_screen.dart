@@ -125,7 +125,7 @@ class _CargoScreenState extends State<CargoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Cargo Flash'),
+        title: Text('Cargo Express'),
         backgroundColor: Colors.orange,
       ),
       body: _isLoading

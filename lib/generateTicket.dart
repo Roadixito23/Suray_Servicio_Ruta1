@@ -1,103 +1,135 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'pdf_generator.dart';
-import 'package:provider/provider.dart';
-import 'ReporteCaja.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'ComprobanteModel.dart';
-import 'pdf_optimizer.dart'; // Import our optimizer
+import 'pdf_optimizer.dart';
+import 'pdf_resource_manager.dart';
 
 class GenerateTicket {
-  final PdfGenerator pdfGenerator = PdfGenerator();
-  final PdfOptimizer optimizer = PdfOptimizer(); // Add the optimizer
+  final PdfOptimizer optimizer = PdfOptimizer();
+  final PdfResourceManager resourceManager = PdfResourceManager();
   bool resourcesPreloaded = false;
+  final Map<String, Uint8List> _cachedAssets = {};
 
-  // Preload resources method to be called at app initialization
+  /// Precarga logo, headTicket y footer desde PdfResourceManager
   Future<void> preloadResources() async {
-    if (!resourcesPreloaded) {
+    if (resourcesPreloaded) return;
+    try {
+      await resourceManager.initialize();
       await optimizer.preloadResources();
+
+      _cachedAssets['logo']      = resourceManager.getAsset('assets/logobkwt.png');
+      _cachedAssets['headTicket'] = resourceManager.getAsset('assets/headTicket.png');
+      _cachedAssets['endTicket'] = resourceManager.getAsset('assets/endTicket.png');
+
       resourcesPreloaded = true;
+    } catch (e) {
+      print('GenerateTicket: Error preloading resources: $e');
+      resourcesPreloaded = false;
     }
   }
 
+  /// Genera e imprime el ticket PDF
   Future<void> generateTicketPdf(
       BuildContext context,
       double valor,
-      bool isSwitchOn,
-      String nombrePasaje,
-      String ownerName,
-      String phoneNumber,
-      String itemName,
+      bool isSunday,
+      String tipo,
+      String owner,
+      String contactInfo,
+      String item,
       ComprobanteModel comprobanteModel,
-      bool isReprint) async {
-    try {
-      // Ensure resources are preloaded
-      if (!resourcesPreloaded) {
-        await preloadResources();
-      }
-
-      // Show immediate feedback to user
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Generando ticket...'),
-            duration: Duration(milliseconds: 800),
-          )
-      );
-
-      // Obtener el modelo de comprobante
-      comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
-
-      // Generate the PDF
-      final clientePdfData = await pdfGenerator.generateTicketPdf(
-          PdfPageFormat(80 * PdfPageFormat.mm, 200 * PdfPageFormat.mm),
-          valor,
-          isSwitchOn,
-          nombrePasaje,
-          ownerName,
-          phoneNumber,
-          itemName,
-          comprobanteModel,
-          isReprint
-      );
-
-      // Almacenar la transacción en ReporteCaja solo si no es reimpresión
-      if (!isReprint) {
-        final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
-        reporteCaja.receiveData(nombrePasaje, valor, comprobanteModel.comprobanteNumber.toString());
-      }
-
-      // Imprimir el PDF de la copia del cliente
-      if (clientePdfData != null) {
-        await Printing.layoutPdf(
-          onLayout: (PdfPageFormat format) async => clientePdfData,
-        );
-      } else {
-        print('No se pudo generar el PDF de la copia del cliente.');
-      }
-
-      // Success message
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ticket generado correctamente'),
-            duration: Duration(seconds: 1),
-            backgroundColor: Colors.green,
-          )
-      );
-
-    } catch (e) {
-      // Show error message
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al generar ticket: $e'),
-            backgroundColor: Colors.red,
-          )
-      );
-
-      // Clear cached resources on error to free memory
-      optimizer.clearCache();
-      resourcesPreloaded = false;
-
-      print('Error en generateTicketPdf: $e');
+      bool isReprint,
+      ) async {
+    if (!resourcesPreloaded) {
+      await preloadResources();
     }
+
+    final now       = DateTime.now();
+    final priceFmt  = NumberFormat('#,###', 'es_CL');
+    final formatted = priceFmt.format(valor);
+
+    final doc = optimizer.createDocument();
+
+    if (!isReprint) {
+      await comprobanteModel.incrementComprobante();
+    }
+    final ticketId = comprobanteModel.formattedComprobante;
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.roll80,
+        build: (pw.Context _) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              // Logo
+              pw.Image(
+                pw.MemoryImage(_cachedAssets['logo']!),
+                width: 100,
+                height: 80,
+              ),
+              pw.SizedBox(height: 10),
+
+              // Tipo de ticket
+              pw.Text(
+                tipo,
+                style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                textAlign: pw.TextAlign.center,
+              ),
+              pw.SizedBox(height: 5),
+
+              // Valor
+              pw.Text('Valor: \$${formatted}', style: pw.TextStyle(fontSize: 14)),
+              pw.SizedBox(height: 5),
+
+              // Cliente y contacto
+              pw.Text('Cliente: $owner', style: pw.TextStyle(fontSize: 12)),
+              pw.SizedBox(height: 5),
+              pw.Text('Contacto: $contactInfo', style: pw.TextStyle(fontSize: 12)),
+              pw.SizedBox(height: 5),
+
+              // Artículo
+              pw.Text('Artículo: $item', style: pw.TextStyle(fontSize: 12)),
+              pw.SizedBox(height: 10),
+
+              // Número de ticket
+              pw.Text(
+                'Ticket N° $ticketId',
+                style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+              ),
+              pw.SizedBox(height: 5),
+
+              // Fecha y hora
+              pw.Text(
+                'Fecha: ${DateFormat('dd/MM/yyyy').format(now)}  Hora: ${DateFormat('HH:mm:ss').format(now)}',
+                style: pw.TextStyle(fontSize: 10),
+                textAlign: pw.TextAlign.center,
+              ),
+              pw.SizedBox(height: 10),
+
+              // Footer
+              pw.Image(
+                pw.MemoryImage(_cachedAssets['endTicket']!),
+                width: 200,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    // Enviar a impresión
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat _) async => doc.save(),
+    );
+
+    // Guardar último ID de ticket (opcional)
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lastTicketId', ticketId);
   }
 }

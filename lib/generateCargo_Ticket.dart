@@ -38,7 +38,8 @@ class CargoTicketGenerator {
 
   // Simplified header builder
   pw.Widget _buildHeader(String ticketId) {
-    return PdfTicketComponents.buildHeader(_optimizer.logo, ticketId);
+    return PdfTicketComponents.buildHeader(_optimizer.getLogoImage(), ticketId);
+
   }
 
   // Simplified content builder
@@ -155,22 +156,32 @@ class CargoTicketGenerator {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
+          pw.SizedBox(height: 12),
+          pw.Text('__________________________', style: pw.TextStyle(fontSize: 10)),
+          pw.Text('Nombre', style: pw.TextStyle(fontSize: 10)),
+          pw.SizedBox(height: 12),
+          pw.Text('__________________________', style: pw.TextStyle(fontSize: 10)),
+          pw.Text('R.U.T.', style: pw.TextStyle(fontSize: 10)),
+          pw.SizedBox(height: 16),
+          pw.Text('___________________________', style: pw.TextStyle(fontSize: 10)),
+          pw.Text('                 Firma', style: pw.TextStyle(fontSize: 10)),
+          pw.SizedBox(height: 8),
           pw.Text(
-            'N° $ticketId',
+            'Comprobante N° $ticketId',
             style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
           ),
-          pw.SizedBox(height: 6),
-          pw.Text('Nombre: __________________________', style: pw.TextStyle(fontSize: 10)),
           pw.SizedBox(height: 4),
-          pw.Text('RUT: ____________________________', style: pw.TextStyle(fontSize: 10)),
-          pw.SizedBox(height: 4),
-          pw.Text('Firma: ___________________________', style: pw.TextStyle(fontSize: 10)),
-          pw.SizedBox(height: 6),
           pw.Text('Artículo: $articulo', style: pw.TextStyle(fontSize: 10)),
           pw.SizedBox(height: 4),
           pw.Text('Valor: \$${_priceFmt.format(precio)}', style: pw.TextStyle(fontSize: 10)),
           pw.SizedBox(height: 4),
-          pw.Text('Fecha despacho: $fechaDespacho', style: pw.TextStyle(fontSize: 10)),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Fecha: $fechaDespacho', style: pw.TextStyle(fontSize: 10)),
+              pw.Text('Hora: 13:31', style: pw.TextStyle(fontSize: 10)),
+            ],
+          ),
         ],
       ),
     );
@@ -272,7 +283,7 @@ class CargoTicketGenerator {
               time,
             ),
             pw.SizedBox(height: 6),
-            pw.Center(child: pw.Image(_optimizer.endImage, width: _pdfWidth * 0.8)),
+            pw.Center(child: pw.Image(_optimizer.getEndImage(), width: _pdfWidth * 0.8)),
           ],
         ),
       ),
@@ -321,7 +332,7 @@ class CargoTicketGenerator {
               children: [
                 pw.Padding(
                   padding: pw.EdgeInsets.only(right: 4),
-                  child: pw.Image(_optimizer.scissors, width: 12),
+                  child: pw.Image(_optimizer.getTijeraImage(), width: 12),
                 ),
                 pw.Expanded(
                   child: pw.Container(
@@ -446,7 +457,7 @@ class CargoTicketGenerator {
               time,
             ),
             pw.SizedBox(height: 6),
-            pw.Center(child: pw.Image(_optimizer.endImage, width: _pdfWidth * 0.8)),
+            pw.Center(child: pw.Image(_optimizer.getEndImage(), width: _pdfWidth * 0.8)),
           ],
         ),
       ),
@@ -495,7 +506,7 @@ class CargoTicketGenerator {
               children: [
                 pw.Padding(
                   padding: pw.EdgeInsets.only(right: 4),
-                  child: pw.Image(_optimizer.scissors, width: 12),
+                  child: pw.Image(_optimizer.getTijeraImage(), width: 12),
                 ),
                 pw.Expanded(
                   child: pw.Container(

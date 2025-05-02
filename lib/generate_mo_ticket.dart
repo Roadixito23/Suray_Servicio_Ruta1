@@ -23,6 +23,10 @@ class MoTicketGenerator {
     }
   }
 
+  Future<void> preloadResources() async {
+    await _ensureResourcesLoaded();
+  }
+
   Future<void> generateMoTicket(
       PdfPageFormat format,
       List<Map<String, dynamic>> offerEntries,
@@ -165,14 +169,11 @@ class MoTicketGenerator {
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
               // Use our optimized header component
-              PdfTicketComponents.buildHeader(_optimizer.logo, comprobante),
-
+              PdfTicketComponents.buildHeader(_optimizer.getLogoImage(),comprobante),
               pw.SizedBox(height: 5),
 
               // Add reprint indicator if needed
               if (isReprint)
-                PdfTicketComponents.buildReprintIndicator(),
-
               // Simplified title
               pw.Text('Oferta en Ruta',
                 style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
@@ -201,9 +202,6 @@ class MoTicketGenerator {
 
               pw.SizedBox(height: 3),
 
-              // Date and time
-              PdfTicketComponents.buildDateTimeFooter(currentDate, currentTime),
-
               // Add reprint date if needed
               if (isReprint) ...[
                 pw.SizedBox(height: 5),
@@ -215,7 +213,7 @@ class MoTicketGenerator {
               ],
 
               // Footer image
-              pw.Image(_optimizer.endImage),
+              pw.Image(_optimizer.getEndImage()),
             ],
           );
         },
