@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'cargo_history_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'cargo_screen.dart';
@@ -18,6 +17,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'generate_mo_ticket.dart';
 import 'ComprobanteModel.dart';
+
 
 class Home extends StatefulWidget {
   @override
@@ -44,6 +44,41 @@ class _HomeState extends State<Home> {
   final TextEditingController _itemController = TextEditingController();
   final FocusNode _contactFocusNode = FocusNode();
   List<Map<String, dynamic>> _appBarSlots = List.generate(8, (index) => {'isEmpty': true, 'element': null});
+
+  bool _hasPreviousDayTransactions() {
+    final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+    final yesterday = DateTime.now().subtract(Duration(days: 1));
+    final yDay = DateFormat('dd').format(yesterday);
+    final yMonth = DateFormat('MM').format(yesterday);
+    return reporteCaja
+        .getOrderedTransactions()
+        .any((t) =>
+    t['dia'] == yDay
+        && t['mes'] == yMonth
+        && !t['nombre'].toString().startsWith('Anulación:')
+    );
+  }
+  Future<void> _showPreviousDayAlert() async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Venta Denegada'),
+          content: Text(
+              'No es posible generar ventas porque existen transacciones del día anterior. '
+                  'Por favor cierre la caja primero.'
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text('Entendido'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   // Variables para la configuración de botones
   bool _showIcons = true;
@@ -244,41 +279,6 @@ class _HomeState extends State<Home> {
         ),
       );
     }
-
-    else if (elementKey == 'mail') {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 3.0),
-        child: Container(
-          width: 34, // 🔹 Ajusta tamaño del botón
-          height: 34,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.pinkAccent,
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(21),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => CargoHistoryScreen()), // 🔹 Navegar a la pantalla de historial
-                );
-              },
-              child: Center(
-                child: Icon(
-                  Icons.mail, // 📩 Ícono de correo
-                  color: Colors.black, // 🔹 Ícono negro
-                  size: 24, // 🔹 Ajustable
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-
     // Delete button
     else if (elementKey == 'delete') {
       return Padding(
@@ -316,7 +316,19 @@ class _HomeState extends State<Home> {
     }
 
     // Reprint button
+// Reprint button
     else if (elementKey == 'reprint') {
+      // ¿La última transacción es de cargo?
+      bool isCargo = _lastTransaction != null
+          && _lastTransaction!['nombre']
+              .toString()
+              .toLowerCase()
+              .contains('cargo');
+      // ¿Podemos reimprimir? — Siempre para cargo, o solo una vez para otros
+      bool canReprint = _lastTransaction != null
+          && !_isReprinting
+          && (isCargo || !_hasReprinted);
+
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 3.0),
         child: Container(
@@ -324,18 +336,20 @@ class _HomeState extends State<Home> {
           height: 34,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: _lastTransaction == null || _isReprinting || _hasReprinted ? Colors.white : Color(0xFFFFD71F),
+            color: canReprint ? Color(0xFFFFD71F) : Colors.white,
           ),
           child: Material(
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(21),
-              onTap: _lastTransaction == null || _isReprinting || _hasReprinted ? null : _handleReprint,
-              child: Image.asset(
-                'assets/reprint.png',
-                width: 20,
-                height: 20,
-                fit: BoxFit.contain,
+              onTap: canReprint ? _handleReprint : null,
+              child: Center(
+                child: Image.asset(
+                  'assets/reprint.png',
+                  width: 20,
+                  height: 20,
+                  fit: BoxFit.contain,
+                ),
               ),
             ),
           ),
@@ -508,18 +522,22 @@ class _HomeState extends State<Home> {
   }
 
   Future<void> _generateTicket(String tipo, double valor, bool isCorrespondencia) async {
+    if (_hasPreviousDayTransactions()) {
+      await _showPreviousDayAlert();
+      return;
+    }
+
     if (_isButtonDisabled) return;
 
     setState(() {
       _hasReprinted = false;
-      _hasAnulado = false;
+      _hasAnulado   = false;
       _isButtonDisabled = true;
       _isLoading = true;
     });
 
     try {
       final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
-
       await generateTicket.generateTicketPdf(
           context,
           valor,
@@ -531,8 +549,6 @@ class _HomeState extends State<Home> {
           comprobanteModel,
           false
       );
-
-      // Guardar la información de la última transacción
       setState(() {
         _lastTransaction = {
           'nombre': tipo,
@@ -541,7 +557,6 @@ class _HomeState extends State<Home> {
           'comprobante': comprobanteModel.formattedComprobante,
         };
       });
-
     } catch (e) {
       print('Error generando ticket: $e');
     } finally {
@@ -564,16 +579,22 @@ class _HomeState extends State<Home> {
 
   // Métodos de reimpresión
   void _handleReprint() async {
-    // Check if already reprinted for non-cargo transactions
-    if (_hasReprinted && _lastTransaction != null &&
-        !_lastTransaction!['nombre'].toString().toLowerCase().contains('cargo')) {
+    // 1) Si no es cargo y ya reimpreso, bloqueo
+    if (_hasReprinted
+        && _lastTransaction != null
+        && !_lastTransaction!['nombre']
+            .toString()
+            .toLowerCase()
+            .contains('cargo')) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ya se ha reimpreso este boleto. Genere uno nuevo para reimprimir.'))
+          SnackBar(content: Text(
+              'Ya se ha reimpreso este boleto. Genere uno nuevo para reimprimir.'
+          ))
       );
       return;
     }
 
-    // No last transaction at all
+    // 2) Sin última transacción
     if (_lastTransaction == null) {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('No hay transacción para reimprimir'))
@@ -581,16 +602,23 @@ class _HomeState extends State<Home> {
       return;
     }
 
-    // First authenticate with password
-    bool isAuthenticated = await _showReprintPasswordDialog();
+    // 3) Pedir contraseña
+    bool ok = await _showReprintPasswordDialog();
+    if (!ok) return;
 
-    if (!isAuthenticated) {
-      return; // Authentication failed or cancelled
+    // 4) Cargo → muestro siempre opciones Cliente/Carga/Ambas
+    final nombre = _lastTransaction!['nombre'].toString().toLowerCase();
+    if (nombre.contains('cargo')) {
+      await _showLastCargoReprintOptions();
+    } else {
+      // Resto → flujo actual (una única reimpresión)
+      await _showReprintOptionsDialog();
+      // marcar como reimpreso
+      setState(() { _hasReprinted = true; });
     }
-
-    // Show reprint options
-    await _showReprintOptionsDialog();
   }
+
+
 
   Future<bool> _showReprintPasswordDialog() async {
     final TextEditingController passwordController = TextEditingController();
@@ -788,21 +816,20 @@ class _HomeState extends State<Home> {
       builder: (BuildContext context) {
         return AlertDialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20.0),
+            borderRadius: BorderRadius.circular(20),
           ),
-          elevation: 24,
           title: Row(
             children: [
               Icon(Icons.print, color: Colors.yellow.shade600, size: 32),
               SizedBox(width: 10),
               Expanded(
                 child: Text(
-                    'Opciones de Reimpresión',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.amber.shade800,
-                      fontSize: 20,
-                    )
+                  'Opciones de Reimpresión',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.amber.shade800,
+                    fontSize: 20,
+                  ),
                 ),
               ),
             ],
@@ -811,156 +838,38 @@ class _HomeState extends State<Home> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Last transaction option (if available and valid)
-                if (_lastTransaction != null &&
-                    (!_hasReprinted || _lastTransaction!['nombre'].toString().toLowerCase().contains('cargo')))
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.grey.withOpacity(0.2),
-                          blurRadius: 5,
-                          offset: Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    margin: EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      leading: Container(
-                        padding: EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: _lastTransaction!['nombre'].toString().toLowerCase().contains('cargo')
-                              ? Colors.orange.withOpacity(0.2)
-                              : Colors.blue.withOpacity(0.2),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          _lastTransaction!['nombre'].toString().toLowerCase().contains('cargo')
-                              ? Icons.inventory
-                              : Icons.receipt_long,
-                          color: _lastTransaction!['nombre'].toString().toLowerCase().contains('cargo')
-                              ? Colors.orange
-                              : Colors.blue,
-                          size: 28,
-                        ),
-                      ),
-                      title: Text(
-                        'Reimprimir última transacción',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                      subtitle: Text(
-                        _lastTransaction!['nombre'] ?? 'Transacción',
-                        style: TextStyle(
-                          color: Colors.grey.shade700,
-                        ),
-                      ),
-                      trailing: Icon(Icons.arrow_forward_ios, color: Colors.grey),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        _handleLastTransactionReprint();
-                      },
-                    ),
-                  ),
-
-                // Divider if both options are shown
-                if (_lastTransaction != null &&
-                    (!_hasReprinted || _lastTransaction!['nombre'].toString().toLowerCase().contains('cargo')))
-                  Divider(color: Colors.grey.shade300, thickness: 1),
-
-                // Cargo history option
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.grey.withOpacity(0.2),
-                        blurRadius: 5,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  margin: EdgeInsets.symmetric(vertical: 8),
-                  child: ListTile(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    contentPadding: EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                    leading: Container(
-                      padding: EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.2),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.inventory_2_outlined,
-                        color: Colors.orange,
-                        size: 28,
-                      ),
-                    ),
+                if (_lastTransaction != null && !_hasReprinted)
+                  ListTile(
+                    leading: Icon(Icons.receipt_long, color: Colors.blue, size: 28),
                     title: Text(
-                      'Reimprimir boleta de Cargo',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                      'Reimprimir última transacción',
+                      style: TextStyle(fontWeight: FontWeight.bold),
                     ),
-                    subtitle: Text(
-                      'Seleccionar del historial (últimas 2 semanas)',
-                      style: TextStyle(
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
+                    subtitle: Text(_lastTransaction!['nombre'] ?? 'Transacción'),
                     trailing: Icon(Icons.arrow_forward_ios, color: Colors.grey),
                     onTap: () {
                       Navigator.of(context).pop();
-                      _showCargoHistoryScreen();
+                      _handleLastTransactionReprint();
                     },
                   ),
-                ),
               ],
             ),
           ),
           actions: [
-            Container(
-              margin: EdgeInsets.only(bottom: 10, right: 10),
-              child: TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: Text(
-                  'Cancelar',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey.shade700,
-                  ),
-                ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(
+                'Cancelar',
+                style: TextStyle(color: Colors.grey.shade700),
               ),
             ),
           ],
-          actionsPadding: EdgeInsets.only(right: 10),
-          contentPadding: EdgeInsets.fromLTRB(24, 20, 24, 24),
-          titlePadding: EdgeInsets.fromLTRB(24, 24, 24, 10),
-          backgroundColor: Colors.white,
         );
       },
     );
   }
+
+
 
 // 2. Diálogo para mostrar opciones de cargo para reimprimir (rediseñado)
   Future<void> _showLastCargoReprintOptions() async {
@@ -1215,15 +1124,6 @@ class _HomeState extends State<Home> {
     }
   }
 
-  void _showCargoHistoryScreen() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CargoHistoryScreen(),
-      ),
-    );
-  }
-
   Future<void> _reprintOfferTicket() async {
     try {
       // Verificar que existe la información necesaria
@@ -1314,395 +1214,231 @@ class _HomeState extends State<Home> {
 
   Future<void> _reprintCargoTicket(bool printClient, bool printCargo) async {
     final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
-    final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
-
-    // Crear instancia del generador de tickets de cargo
-    CargoTicketGenerator cargoTicketGenerator = CargoTicketGenerator(comprobanteModel, reporteCaja);
+    final reporteCaja      = Provider.of<ReporteCaja>(context, listen: false);
+    final cargoGen         = CargoTicketGenerator(comprobanteModel, reporteCaja);
 
     try {
-      // Verificar si es el nuevo formato de cargo o el antiguo
-      if (_lastTransaction!['tipo'] == 'cargoNuevo') {
-        // Usar el método de reimpresión nuevo con los campos adicionales
-        String destinatario = _lastTransaction!['destinatario'] ?? '';
-        String remitente = _lastTransaction!['remitente'] ?? '';
-        String articulo = _lastTransaction!['articulo'] ?? '';
-        double valor = _lastTransaction!['valor'] ?? 0.0;
-        String telefonoDest = _lastTransaction!['telefonoDest'] ?? '';
-        String telefonoRemit = _lastTransaction!['telefonoRemit'] ?? '';
-        String ticketNum = _lastTransaction!['ticketNum'] ?? '';
+      // Extraemos los campos de _lastTransaction
+      final String destinatario = _lastTransaction!['destinatario'] as String? ?? '';
+      final String articulo     = _lastTransaction!['articulo']    as String? ?? '';
+      final double valor        = _lastTransaction!['precio']      as double? ?? 0.0;
+      final String destino      = _lastTransaction!['destino']     as String? ?? '';
+      final String telefono     = _lastTransaction!['telefono']    as String? ?? '';
 
-        await cargoTicketGenerator.reprintNewCargoPdf(
-            destinatario,
-            remitente,
-            articulo,
-            valor,
-            telefonoDest,
-            telefonoRemit,
-            true, // isTelefonoDestOptional
-            true, // isTelefonoRemitOptional
-            printClient,
-            printCargo,
-            ticketNum,
-            _lastTransaction!['destino']
-        );
-      } else {
-        // Método antiguo para compatibilidad con tickets anteriores
-        String fullName = _lastTransaction!['nombre'] ?? '';
-        String destinatario = fullName.contains(':') ? fullName.split(':')[1].trim() : '';
-        double valor = _lastTransaction!['valor'] ?? 0.0;
-        String contactInfo = _lastTransaction!['contactInfo'] ?? '';
-        String articulo = _lastTransaction!['articulo'] ?? 'Artículo';
-        bool isPhone = _lastTransaction!['isPhone'] ?? true;
+      // Obtenemos el comprobante actual (no incrementa en reimpresión)
+      final String ticketNum = comprobanteModel.formattedComprobante;
 
-        await cargoTicketGenerator.reprintCargoPdf(
-          destinatario,
-          articulo,
-          valor,
-          contactInfo,
-          isPhone,
-          printClient,
-          printCargo,
-        );
-      }
+      // Llamada con los 8 parámetros correctos
+      await cargoGen.reprintNewCargoPdf(
+        destinatario,
+        articulo,
+        valor,
+        destino,
+        telefono,
+        printClient,
+        printCargo,
+        ticketNum,
+      );
 
-      setState(() {
-        _hasReprinted = true;
-      });
-
+      setState(() { _hasReprinted = true; });
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Reimpresión completada correctamente'))
       );
-
     } catch (e) {
       print('Error en _reprintCargoTicket: $e');
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error al reimprimir: $e'))
       );
-      setState(() {
-        _hasReprinted = false; // Permitir intentar de nuevo si falla
-      });
+      setState(() { _hasReprinted = false; });
     }
   }
 
-  Future<void> _showMultiOfferDialog() {
-    final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
-    List<Map<String, dynamic>> offerEntries = [];
-    offerEntries.add({
-      'number': '',
-      'value': '',
-      'numberController': TextEditingController(text: ''),
-      'valueController': TextEditingController(text: ''),
-    });
+  Future<void> _showMultiOfferDialog() async {
+    // 1) Bloquear si hay transacciones del día anterior
+    if (_hasPreviousDayTransactions()) {
+      await _showPreviousDayAlert();
+      return;
+    }
 
-    return showDialog(
+    final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+    // Formateador solo para miles, sin decimales
+    final decimalFormatter = NumberFormat.decimalPattern('es_CL');
+
+    List<Map<String, dynamic>> offerEntries = [
+      {
+        'numberController': TextEditingController(),
+        'valueController': TextEditingController(),
+        'numberFocus': FocusNode(),
+        'valueFocus': FocusNode(),
+      }
+    ];
+
+    await showGeneralDialog(
       context: context,
-      builder: (BuildContext context) {
+      barrierDismissible: false,
+      barrierLabel: 'Oferta Ruta',
+      transitionDuration: Duration(milliseconds: 300),
+      pageBuilder: (ctx, anim1, anim2) {
         return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
+          builder: (BuildContext dialogContext, StateSetter dialogSetState) {
             bool isLoading = false;
 
-            return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20.0),
-              ),
-              elevation: 24,
-              title: Row(
-                children: [
-                  Icon(Icons.local_offer, color: Colors.amber.shade700, size: 32),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                        'Oferta en Ruta',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.amber.shade800,
-                          fontSize: 20,
-                        )
-                    ),
-                  ),
+            // Calcula el total en cada rebuild
+            double currentTotal = offerEntries.fold(0.0, (sum, e) {
+              final qty = double.tryParse(e['numberController'].text) ?? 0;
+              final val = double.tryParse(e['valueController'].text) ?? 0;
+              return sum + qty * val;
+            });
+
+            Future<void> _submitAndPrint() async {
+              dialogSetState(() => isLoading = true);
+              Navigator.of(dialogContext).pop();
+              if (!mounted) return;
+              setState(() {
+                _isButtonDisabled = true;
+                _isLoading = true;
+              });
+              try {
+                final entriesForTicket = offerEntries.map((e) => {
+                  'number': e['numberController'].text,
+                  'value': e['valueController'].text,
+                }).toList();
+                await moTicketGenerator.generateMoTicket(
+                  PdfPageFormat.standard,
+                  entriesForTicket,
+                  _switchValue,
+                  context,
+                      (String nombre, double valor, List<double> subtots, String comprobante) {
+                    reporteCaja.addOfferEntries(subtots, valor, comprobante);
+                    if (!mounted) return;
+                    setState(() {
+                      _lastTransaction = {
+                        'nombre': 'Oferta Ruta',
+                        'valor': currentTotal,
+                        'switchValue': _switchValue,
+                        'comprobante': comprobante,
+                        'offerEntries': entriesForTicket,
+                        'tipo': 'ofertaMultiple',
+                      };
+                      _hasReprinted = false;
+                      _hasAnulado = false;
+                    });
+                  },
+                );
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error al imprimir: $e'), backgroundColor: Colors.red),
+                  );
+                }
+              } finally {
+                if (!mounted) return;
+                setState(() {
+                  _isButtonDisabled = false;
+                  _isLoading = false;
+                });
+              }
+            }
+
+            return Scaffold(
+              backgroundColor: Colors.white,
+              appBar: AppBar(
+                backgroundColor: Colors.amber.shade800,
+                title: Text('Oferta en Ruta'),
+                actions: [
+                  IconButton(
+                    icon: Icon(Icons.close),
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                  )
                 ],
               ),
-              content: Container(
-                width: MediaQuery.of(context).size.width * 0.8,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        margin: EdgeInsets.only(top: 16),
-                        padding: EdgeInsets.symmetric(vertical: 5, horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.amber.shade200),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                                'TOTAL:',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16
-                                )
-                            ),
-                            Text(
-                              '\$${NumberFormat('#,###').format(offerEntries.fold(0.0, (sum, entry) {
-                                double number = double.tryParse(entry['number'] ?? '0') ?? 0.0;
-                                double value = double.tryParse(entry['value'] ?? '0') ?? 0.0;
-                                return sum + (number * value);
-                              }))}',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                  color: Colors.amber.shade900
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Lista de entradas dinámicas
-                      ListView.separated(
-                        shrinkWrap: true,
-                        physics: NeverScrollableScrollPhysics(),
+              body: Padding(
+                padding: EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
                         itemCount: offerEntries.length,
-                        separatorBuilder: (context, index) => SizedBox(height: 10),
-                        itemBuilder: (context, index) {
-                          return AnimatedContainer(
-                            duration: Duration(milliseconds: 300),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                  color: Colors.grey.shade300,
-                                  width: 1
+                        itemBuilder: (_, i) {
+                          final e = offerEntries[i];
+                          return Row(
+                            children: [
+                              Expanded(
+                                flex: 2,
+                                child: TextField(
+                                  controller: e['numberController'],
+                                  focusNode: e['numberFocus'],
+                                  decoration: InputDecoration(
+                                    labelText: 'Cantidad',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  keyboardType: TextInputType.number,
+                                ),
                               ),
-                              borderRadius: BorderRadius.circular(12),
-                              color: Colors.grey.shade50,
-                            ),
-                            padding: EdgeInsets.all(8),
-                            child: Row(
-                              children: [
-                                // Campo Cantidad
-                                Expanded(
-                                  child: TextField(
-                                    decoration: InputDecoration(
-                                      labelText: 'N°',
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                      isDense: true,
-                                    ),
-                                    keyboardType: TextInputType.number,
-                                    controller: offerEntries[index]['numberController'],
-                                    onChanged: (value) {
-                                      offerEntries[index]['number'] = value;
-                                      setState(() {});
-                                    },
+                              SizedBox(width: 8),
+                              Expanded(
+                                flex: 3,
+                                child: TextField(
+                                  controller: e['valueController'],
+                                  focusNode: e['valueFocus'],
+                                  decoration: InputDecoration(
+                                    labelText: 'Valor',
+                                    border: OutlineInputBorder(),
                                   ),
+                                  keyboardType: TextInputType.number,
                                 ),
-                                SizedBox(width: 10),
-
-                                // Campo Precio
-                                Expanded(
-                                  child: TextField(
-                                    decoration: InputDecoration(
-                                      labelText: '\$\$\$',
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      prefixText: '\$',
-                                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                                      isDense: true,
-                                    ),
-                                    keyboardType: TextInputType.number,
-                                    controller: offerEntries[index]['valueController'],
-                                    onChanged: (value) {
-                                      offerEntries[index]['value'] = value;
-                                      setState(() {});
-                                    },
-                                  ),
-                                ),
-
-                                // Botón para eliminar entrada
+                              ),
+                              if (offerEntries.length > 1) ...[
                                 IconButton(
-                                  icon: Icon(
-                                    Icons.remove_circle_outline,
-                                    color: Colors.red.shade400,
-                                    size: 20,
-                                  ),
+                                  icon: Icon(Icons.remove_circle, color: Colors.red),
                                   onPressed: () {
-                                    if (offerEntries.length > 1) {
-                                      offerEntries[index]['numberController'].dispose();
-                                      offerEntries[index]['valueController'].dispose();
-                                      offerEntries.removeAt(index);
-                                      setState(() {});
-                                    }
+                                    dialogSetState(() => offerEntries.removeAt(i));
                                   },
-                                ),
-                              ],
-                            ),
+                                )
+                              ]
+                            ],
                           );
                         },
                       ),
-
-                      // Botón para agregar nueva entrada
-                      if (offerEntries.length < 6)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 16.0),
-                          child: ElevatedButton.icon(
-                            icon: Icon(Icons.add, color: Colors.white),
-                            label: Text('Agregar Entrada'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.amber.shade700,
-                              foregroundColor: Colors.white,
-                              elevation: 2,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                            ),
+                    ),
+                    SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Text('Total:',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        Spacer(),
+                        Text('\$${decimalFormatter.format(currentTotal)}',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    SizedBox(height: 16),
+                    if (!isLoading)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          ElevatedButton.icon(
                             onPressed: () {
-                              offerEntries.add({
-                                'number': '',
-                                'value': '',
-                                'numberController': TextEditingController(text: ''),
-                                'valueController': TextEditingController(text: ''),
-
-                              });
-                              setState(() {});
+                              dialogSetState(() => offerEntries.add({
+                                'numberController': TextEditingController(),
+                                'valueController': TextEditingController(),
+                                'numberFocus': FocusNode(),
+                                'valueFocus': FocusNode(),
+                              }));
                             },
+                            icon: Icon(Icons.add),
+                            label: Text('Agregar línea'),
                           ),
-                        ),
-                    ],
-                  ),
+                          ElevatedButton(
+                            onPressed: _submitAndPrint,
+                            child: Text('Imprimir'),
+                          ),
+                        ],
+                      )
+                    else
+                      CircularProgressIndicator(),
+                  ],
                 ),
               ),
-
-              actions: [
-                // Botón cancelar
-
-                TextButton(
-                  onPressed: () {
-                    for (var entry in offerEntries) {
-                      entry['number'] = '';
-                      entry['value'] = '';
-                      entry['numberController'].clear();
-                      entry['valueController'].clear();
-                    }
-                    Navigator.of(context).pop();
-                  },
-                  child: Text(
-                    'Cancelar',
-                    style: TextStyle(
-                      color: Colors.black,
-                      fontSize: 16,
-                    ),
-                  ),
-                  style: TextButton.styleFrom(
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
-                ),
-
-                // Botón imprimir
-                ElevatedButton.icon(
-                  icon: Icon(
-                      Icons.print,
-                      color: Colors.white
-                  ),
-                  label: Text(
-                    'Imprimir',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    foregroundColor: Colors.white,
-                    elevation: 3,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
-                  onPressed: isLoading || _isTotalZero(offerEntries) ? null : () async {
-                    Navigator.of(context).pop();
-
-                    // Mantén la lógica existente para la generación de tickets
-                    this.setState(() {
-                      _isButtonDisabled = true;
-                      _isLoading = true;
-                    });
-
-                    try {
-                      Provider.of<ComprobanteModel>(context, listen: false);
-
-                      double totalValue = offerEntries.fold(0.0, (sum, entry) {
-                        double number = double.tryParse(entry['number'] ?? '0') ?? 0.0;
-                        double value = double.tryParse(entry['value'] ?? '0') ?? 0.0;
-                        return sum + (number * value);
-                      });
-
-                      List<Map<String, dynamic>> offerEntriesForReprint = [];
-                      for (var entry in offerEntries) {
-                        offerEntriesForReprint.add({
-                          'number': entry['number'],
-                          'value': entry['value'],
-                        });
-                      }
-
-                      await moTicketGenerator.generateMoTicket(
-                        PdfPageFormat.standard,
-                        offerEntries,
-                        _switchValue,
-                        context,
-                            (String nombrePasaje, double valorTotal, List<double> subtotals, String comprobante) {
-                          print('Ticket generado para: $nombrePasaje, Valor Total: \$${valorTotal}');
-                          reporteCaja.addOfferEntries(subtotals, valorTotal, comprobante);
-
-                          this.setState(() {
-                            _lastTransaction = {
-                              'nombre': 'Oferta Ruta',
-                              'valor': totalValue,
-                              'switchValue': _switchValue,
-                              'comprobante': comprobante,
-                              'offerEntries': offerEntriesForReprint,
-                              'tipo': 'ofertaMultiple'
-                            };
-                            _hasReprinted = false;
-                            _hasAnulado = false;
-                          });
-                        },
-                      );
-
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Row(
-                            children: [
-                              Icon(Icons.error_outline, color: Colors.white),
-                              SizedBox(width: 10),
-                              Expanded(child: Text('Error al generar el ticket: $e')),
-                            ],
-                          ),
-                          backgroundColor: Colors.red.shade700,
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    } finally {
-                      this.setState(() {
-                        _isButtonDisabled = false;
-                        _isLoading = false;
-                      });
-                    }
-                  },
-                ),
-              ],
-              actionsPadding: EdgeInsets.fromLTRB(10, 0, 10, 10),
-              contentPadding: EdgeInsets.fromLTRB(24, 20, 24, 24),
-              titlePadding: EdgeInsets.fromLTRB(24, 24, 24, 10),
-              backgroundColor: Colors.white,
             );
           },
         );
@@ -1711,6 +1447,10 @@ class _HomeState extends State<Home> {
   }
 
   void _showOfferDialog() {
+    if (_hasPreviousDayTransactions()) {
+      _showPreviousDayAlert();
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -2161,36 +1901,6 @@ class _HomeState extends State<Home> {
             // Grupo derecho - 2 botones + fecha/día
             Row(
               children: [
-                // Botón Historial de Cargo
-                Container(
-                  width: 35,
-                  height: 35,
-                  margin: EdgeInsets.symmetric(horizontal: 9),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.pinkAccent,
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(21),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => CargoHistoryScreen()),
-                        );
-                      },
-                      child: Center(
-                        child: Icon(
-                          Icons.inventory_2_rounded,
-                          color: Colors.black,
-                          size: 24,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
                 // Botón Ajustes
                 Container(
                   width: 35,
@@ -2518,70 +2228,6 @@ class _HomeState extends State<Home> {
                         mainAxisSize: MainAxisSize.min,
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // Botón de Emergencia arriba
-                          Container(
-                            width: _emergencyButtonWidth,
-                            height: _emergencyButtonHeight,
-                            child: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.red.shade700,
-                                foregroundColor: Colors.white,
-                                elevation: 3,
-                                shadowColor: Colors.red.shade900,
-                                padding: EdgeInsets.zero,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                  side: BorderSide(color: Colors.red.shade900, width: 1.5),
-                                ),
-                                minimumSize: Size(_emergencyButtonWidth, _emergencyButtonHeight),
-                                maximumSize: Size(_emergencyButtonWidth, _emergencyButtonHeight),
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _isOfficeMode = !_isOfficeMode;
-                                });
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Row(
-                                      children: [
-                                        Icon(Icons.business, color: Colors.white),
-                                        SizedBox(width: 10),
-                                        Text('Cambiando a Modo Oficina', style: TextStyle(fontSize: 16)),
-                                      ],
-                                    ),
-                                    backgroundColor: Colors.blue.shade700,
-                                    duration: Duration(seconds: 2),
-                                    behavior: SnackBarBehavior.floating,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    margin: EdgeInsets.all(10),
-                                  ),
-                                );
-                              },
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.warning_amber_rounded,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'Emergencia',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-
-                          SizedBox(height: 8),
-
-                          // Logo abajo (más grande)
                           Image.asset(
                             'assets/logo.png',
                             width: 130,

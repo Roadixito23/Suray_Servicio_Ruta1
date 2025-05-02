@@ -7,6 +7,8 @@ import 'ticket_model.dart';
 import 'sunday_ticket_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'backup_screen.dart';
+import 'ComprobanteModelSettings.dart';
+
 
 class Settings extends StatefulWidget {
   @override
@@ -19,6 +21,45 @@ class _SettingsState extends State<Settings> with SingleTickerProviderStateMixin
   bool isAuthenticated = false;
   double _textSizeMultiplier = 0.8;
   bool _showIcons = true;
+
+  Future<bool> _showComprobanteAuthDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final basePwd = passwordController.text; // tu contraseña actual de Settings
+    final reversed = basePwd.split('').reversed.join();
+    final allowed = prefs.getString('comprobanteSettingsPassword') ?? reversed;
+    String entry = '';
+
+    return (await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Text('Autenticación - N° Comprobante'),
+          content: TextField(
+            onChanged: (v) => entry = v,
+            decoration: InputDecoration(
+              labelText: 'Contraseña (6 dígitos)',
+              border: OutlineInputBorder(),
+            ),
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            maxLength: 6,
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancelar')),
+            ElevatedButton(
+              onPressed: () {
+                if (entry == allowed) Navigator.pop(ctx, true);
+                else ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Contraseña incorrecta'))
+                );
+              },
+              child: Text('OK'),
+            ),
+          ],
+        );
+      },
+    )) ?? false;
+  }
 
   // State variable for icon spacing
   double _iconSpacing = 1.0;
@@ -125,7 +166,7 @@ class _SettingsState extends State<Settings> with SingleTickerProviderStateMixin
   // Flag to track if settings have changed
   bool _settingsChanged = false;
 
-  final String appVersion = '1.1.0';
+  final String appVersion = '01.05.25';
 
   // Variables para TabController
   late TabController _tabController;
@@ -997,6 +1038,33 @@ class _SettingsState extends State<Settings> with SingleTickerProviderStateMixin
                         child: Text('Guardar'),
                       ),
                     ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          SizedBox(height: 20),
+          _buildSectionCard(
+            title: 'N° Comprobante',
+            icon: Icons.confirmation_number,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Reinicia aquí el contador de comprobantes.'),
+                  SizedBox(height: 12),
+                  ElevatedButton(
+                    onPressed: () async {
+                      if (await _showComprobanteAuthDialog()) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => ComprobanteModelSettings()),
+                        );
+                      }
+                    },
+                    child: Text('Reiniciar Contador'),
                   ),
                 ],
               ),

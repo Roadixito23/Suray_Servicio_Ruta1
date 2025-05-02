@@ -18,7 +18,7 @@
     </queries>
 
     <application
-        android:label="POS BUS"
+        android:label="V.01.05.25"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">

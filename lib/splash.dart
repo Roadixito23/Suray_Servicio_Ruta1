@@ -16,7 +16,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   void initState() {
     super.initState();
 
-    // Set up animations
+    // Set up animations (fade in + scale up)
     _animationController = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: 5000),
@@ -36,14 +36,14 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       ),
     );
 
-    // Start animation
     _animationController.forward();
 
-    // Navigate to security screen after animation
-    Timer(Duration(milliseconds: 3000), () {
+    // Navigate after 3 seconds
+    Timer(Duration(seconds: 3), () {
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => SecurityScreen()),
+        MaterialPageRoute(builder: (_) => SecurityScreen()),
       );
     });
   }
@@ -68,54 +68,61 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         child: Center(
           child: AnimatedBuilder(
             animation: _animationController,
-            builder: (context, child) {
-              return FadeTransition(
-                opacity: _fadeAnimation,
-                child: ScaleTransition(
-                  scale: _scaleAnimation,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Image.asset(
-                        'assets/logo.png',
-                        width: 200,
-                        height: 200,
+            builder: (context, _) => FadeTransition(
+              opacity: _fadeAnimation,
+              child: ScaleTransition(
+                scale: _scaleAnimation,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Image.asset(
+                      'assets/logo.png',
+                      width: 200,
+                      height: 200,
+                    ),
+                    SizedBox(height: 30),
+                    Text(
+                      'POS BUS',
+                      style: TextStyle(
+                        fontFamily: 'Hemiheads',
+                        fontSize: 40,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            offset: Offset(2, 2),
+                            blurRadius: 3,
+                            color: Colors.black.withOpacity(0.3),
+                          ),
+                        ],
                       ),
-                      SizedBox(height: 30),
-                      Text(
-                        'Buses Suray',
-                        style: TextStyle(
-                          fontFamily: 'Hemiheads',
-                          fontSize: 40,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          shadows: [
-                            Shadow(
-                              offset: Offset(2.0, 2.0),
-                              blurRadius: 3.0,
-                              color: Colors.black.withOpacity(0.3),
-                            ),
-                          ],
+                    ),
+                    SizedBox(height: 15),
+                    Text(
+                      'Gestión de pasajes y envíos en bus', // breve descripción
+                      style: TextStyle(
+                        fontSize: 18,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 50),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.autorenew, color: Colors.white, size: 30),
+                        SizedBox(width: 10),
+                        Text(
+                          'Cargando...',
+                          style: TextStyle(color: Colors.white, fontSize: 16),
                         ),
-                      ),
-                      SizedBox(height: 15),
-                      Text(
-                        'Sistema Punto de Venta en Bus',
-                        style: TextStyle(
-                          fontSize: 18,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      SizedBox(height: 50),
-                      CircularProgressIndicator(
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ),
-              );
-            },
+              ),
+            ),
           ),
         ),
       ),
