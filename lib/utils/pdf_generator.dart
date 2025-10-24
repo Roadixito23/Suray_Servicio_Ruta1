@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
-import 'ComprobanteModel.dart';
+import '../models/ComprobanteModel.dart';
 import 'pdf_optimizer.dart'; // Import our new optimizer
 
 class PdfGenerator {

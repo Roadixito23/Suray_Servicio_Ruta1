@@ -2,13 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'home.dart';
-import 'pdf_resource_manager.dart';
-import 'pdf_optimizer.dart';
-import 'generateTicket.dart';
-import 'generate_mo_ticket.dart';
-import 'generateCargo_Ticket.dart';
-import 'ComprobanteModel.dart';
-import 'ReporteCaja.dart';
+import '../utils/pdf_resource_manager.dart';
+import '../utils/pdf_optimizer.dart';
+import '../utils/generateTicket.dart';
+import '../utils/generate_mo_ticket.dart';
+import '../utils/generateCargo_Ticket.dart';
+import '../models/ComprobanteModel.dart';
+import '../utils/ReporteCaja.dart';
 
 class SplashScreen extends StatefulWidget {
   @override

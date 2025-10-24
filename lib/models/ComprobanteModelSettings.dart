@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'ComprobanteModel.dart';
-import 'ReporteCaja.dart';  // ← Import necesario para chequear transacciones
+import '../utils/ReporteCaja.dart';  // ← Import necesario para chequear transacciones
 
 class ComprobanteModelSettings extends StatefulWidget {
   @override

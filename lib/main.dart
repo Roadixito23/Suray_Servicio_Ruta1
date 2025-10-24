@@ -2,13 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
-import 'pdf_resource_manager.dart';
-import 'pdf_optimizer.dart';
-import 'ComprobanteModel.dart';
-import 'ReporteCaja.dart';
-import 'ticket_model.dart';
-import 'sunday_ticket_model.dart';
-import 'splash.dart';
+import 'utils/pdf_resource_manager.dart';
+import 'utils/pdf_optimizer.dart';
+import 'models/ComprobanteModel.dart';
+import 'utils/ReporteCaja.dart';
+import 'models/ticket_model.dart';
+import 'models/sunday_ticket_model.dart';
+import 'screens/splash.dart';
 
 void main() async {
   // Ensure Flutter is initialized
