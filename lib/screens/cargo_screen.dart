@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'ComprobanteModel.dart';
-import 'ReporteCaja.dart';
-import 'generateCargo_Ticket.dart';
+import '../models/ComprobanteModel.dart';
+import '../utils/ReporteCaja.dart';
+import '../utils/generateCargo_Ticket.dart';
 
 class CargoScreen extends StatefulWidget {
   final Function(Map<String, dynamic>)? onTransactionComplete;

@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'ComprobanteModel.dart';
+import '../models/ComprobanteModel.dart';
 import 'pdf_optimizer.dart'; // Import our optimizer
 
 class MoTicketGenerator {

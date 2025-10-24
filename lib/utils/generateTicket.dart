@@ -5,7 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'ComprobanteModel.dart';
+import '../models/ComprobanteModel.dart';
 import 'pdf_optimizer.dart';
 import 'pdf_resource_manager.dart';
 

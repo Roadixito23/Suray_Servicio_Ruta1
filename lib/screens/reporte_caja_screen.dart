@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:provider/provider.dart';
-import 'package:untitled3/reporte_recovery.dart';
-import 'pdfReport_generator.dart';
-import 'ReporteCaja.dart';
+import 'reporte_recovery.dart';
+import '../utils/pdfReport_generator.dart';
+import '../utils/ReporteCaja.dart';
 import 'package:printing/printing.dart';
 
 class ReporteCajaScreen extends StatefulWidget {

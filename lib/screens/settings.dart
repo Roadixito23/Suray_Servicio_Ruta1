@@ -3,11 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
-import 'ticket_model.dart';
-import 'sunday_ticket_model.dart';
+import '../models/ticket_model.dart';
+import '../models/sunday_ticket_model.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'backup_screen.dart';
-import 'ComprobanteModelSettings.dart';
+import '../models/ComprobanteModelSettings.dart';
 
 
 class Settings extends StatefulWidget {

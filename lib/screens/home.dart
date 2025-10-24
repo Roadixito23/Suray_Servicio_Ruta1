@@ -2,22 +2,22 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'cargo_screen.dart';
-import 'generateCargo_Ticket.dart';
+import '../utils/generateCargo_Ticket.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
-import 'package:untitled3/reporte_caja_screen.dart';
-import 'generateTicket.dart';
+import 'reporte_caja_screen.dart';
+import '../utils/generateTicket.dart';
 import 'settings.dart';
-import 'ReporteCaja.dart';
-import 'ticket_model.dart';
-import 'sunday_ticket_model.dart';
+import '../utils/ReporteCaja.dart';
+import '../models/ticket_model.dart';
+import '../models/sunday_ticket_model.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'generate_mo_ticket.dart';
-import 'ComprobanteModel.dart';
-import 'pdf_optimizer.dart';
+import '../utils/generate_mo_ticket.dart';
+import '../models/ComprobanteModel.dart';
+import '../utils/pdf_optimizer.dart';
 
 
 class Home extends StatefulWidget {
