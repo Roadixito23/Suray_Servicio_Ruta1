@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/database_service.dart';
 
 class ComprobanteModel extends ChangeNotifier {
-  static const String _comprobanteNumberKey = 'comprobanteNumber'; // Clave para SharedPreferences
-  static const String _ticketIdKey = 'ticketId';                  // Clave para el ID
+  final DatabaseService _dbService = DatabaseService();
 
-  int _comprobanteNumber = 0;  // Ahora arranca en 0 en vez de 1
-  int _ticketId = 1;           // Valor por defecto para el ID
+  int _comprobanteNumber = 0;
+  int _ticketId = 1;
 
   ComprobanteModel() {
     _loadComprobanteNumber();
@@ -17,20 +16,16 @@ class ComprobanteModel extends ChangeNotifier {
   int get ticketId => _ticketId;
 
   Future<void> _loadComprobanteNumber() async {
-    final prefs = await SharedPreferences.getInstance();
-    // Carga o establece a 0 si no existe
-    _comprobanteNumber = prefs.getInt(_comprobanteNumberKey) ?? 0;
+    _comprobanteNumber = await _dbService.getConfiguracionInt('comprobanteNumber', defaultValue: 0);
     notifyListeners();
   }
 
   Future<void> _loadTicketId() async {
-    final prefs = await SharedPreferences.getInstance();
-    _ticketId = prefs.getInt(_ticketIdKey) ?? 1;
+    _ticketId = await _dbService.getConfiguracionInt('ticketId', defaultValue: 1);
     notifyListeners();
   }
 
   String get formattedComprobante {
-    // Formatear el ID con dos dígitos y el número de comprobante con seis
     String formattedId = _ticketId.toString().padLeft(2, '0');
     String comp = _comprobanteNumber.toString().padLeft(6, '0');
     return '$formattedId-$comp';
@@ -39,21 +34,21 @@ class ComprobanteModel extends ChangeNotifier {
   Future<void> incrementComprobante() async {
     _comprobanteNumber++;
     if (_comprobanteNumber > 999999) {
-      _comprobanteNumber = 1; // Sigue reiniciando a 1 tras máximo
+      _comprobanteNumber = 1;
     }
-    await _saveComprobanteNumber();
+    await _dbService.setConfiguracion('comprobanteNumber', _comprobanteNumber.toString(), tipo: 'int');
     notifyListeners();
   }
 
-  Future<void> _saveComprobanteNumber() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_comprobanteNumberKey, _comprobanteNumber);
+  Future<void> resetComprobante() async {
+    _comprobanteNumber = 0;
+    await _dbService.setConfiguracion('comprobanteNumber', _comprobanteNumber.toString(), tipo: 'int');
+    notifyListeners();
   }
 
-  /// Reinicia el contador a 0
-  Future<void> resetComprobante() async {
-    _comprobanteNumber = 0;    // ← ahora reinicia a 0
-    await _saveComprobanteNumber();
+  Future<void> updateTicketId(int newId) async {
+    _ticketId = newId;
+    await _dbService.setConfiguracion('ticketId', _ticketId.toString(), tipo: 'int');
     notifyListeners();
   }
 }
