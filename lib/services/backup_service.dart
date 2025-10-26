@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:share_plus/src/share_plus_linux.dart' show XFile;
 import 'package:archive/archive.dart';
+import 'database_service.dart';
 
 class BackupService {
   static const String backupFolder = 'suray_backups';
@@ -49,6 +50,17 @@ class BackupService {
       await prefsFile.writeAsString(jsonEncode(prefsMap));
 
       // Paso 5: Copiar archivos importantes
+
+      // Copiar base de datos SQLite
+      final dbService = DatabaseService();
+      final dbPath = await dbService.getDatabasePath();
+      final dbFile = File(dbPath);
+      if (await dbFile.exists()) {
+        final targetDbFile = File('${backupTempDir.path}/database/suray_database.db');
+        await targetDbFile.create(recursive: true);
+        await dbFile.copy(targetDbFile.path);
+      }
+
       // Copiar recibos de cargo
       await _copyDirectory(
           '${appDocDir.path}/cargo_receipts',
@@ -102,6 +114,20 @@ class BackupService {
 
       // Paso 4: Restaurar archivos
       final appDocDir = await getApplicationDocumentsDirectory();
+
+      // Restaurar base de datos SQLite
+      final dbFile = File('${extractDir.path}/database/suray_database.db');
+      if (await dbFile.exists()) {
+        final dbService = DatabaseService();
+        final targetDbPath = await dbService.getDatabasePath();
+        final targetDbFile = File(targetDbPath);
+
+        // Cerrar la base de datos antes de reemplazarla
+        await dbService.close();
+
+        // Copiar el archivo de base de datos
+        await dbFile.copy(targetDbPath);
+      }
 
       // Restaurar recibos de cargo
       final cargoDir = Directory('${extractDir.path}/cargo_receipts');

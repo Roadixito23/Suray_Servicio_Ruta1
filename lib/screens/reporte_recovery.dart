@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:pdf/pdf.dart';
-import 'package:printing/printing.dart';
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import '../services/database_service.dart';
+import '../utils/ReporteCaja.dart';
+import 'package:provider/provider.dart';
 
 class RecoveryReport extends StatefulWidget {
   @override
@@ -12,18 +11,17 @@ class RecoveryReport extends StatefulWidget {
 }
 
 class _RecoveryReportState extends State<RecoveryReport> with SingleTickerProviderStateMixin {
-  // Variables para gestionar la retención de archivos
-  final int _retentionPeriodDays = 14; // Período de retención: 14 días (sin límite de cantidad)
-
-  List<FileSystemEntity> pdfFiles = [];
+  final DatabaseService _dbService = DatabaseService();
+  List<Map<String, dynamic>> _cierres = [];
   bool isLoading = true;
+  String _searchQuery = '';
+  String _filterPeriod = 'all'; // all, week, month, custom
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
-    // Inicializar los datos de formato de fecha para español
     initializeDateFormatting('es_ES', null);
 
     _animationController = AnimationController(
@@ -34,7 +32,7 @@ class _RecoveryReportState extends State<RecoveryReport> with SingleTickerProvid
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0)
         .animate(CurvedAnimation(parent: _animationController, curve: Curves.easeIn));
 
-    _loadPdfFiles(); // Cargar los archivos PDF al iniciar
+    _loadCierresCaja();
     _animationController.forward();
   }
 
@@ -44,46 +42,15 @@ class _RecoveryReportState extends State<RecoveryReport> with SingleTickerProvid
     super.dispose();
   }
 
-  Future<void> _loadPdfFiles() async {
+  Future<void> _loadCierresCaja() async {
     setState(() {
       isLoading = true;
     });
 
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final List<FileSystemEntity> files = directory.listSync();
-      final DateTime cutoffDate = DateTime.now().subtract(Duration(days: _retentionPeriodDays));
-
-      // Filtrar por archivos PDF
-      final List<FileSystemEntity> allPdfFiles = files.where((file) => file.path.endsWith('.pdf')).toList();
-
-      // Filtrar archivos más antiguos que 14 días
-      List<FileSystemEntity> filesToDelete = [];
-      List<FileSystemEntity> filesToKeep = [];
-
-      for (var file in allPdfFiles) {
-        final fileStats = File(file.path).statSync();
-        final fileDate = fileStats.modified;
-
-        if (fileDate.isBefore(cutoffDate)) {
-          // Archivo más antiguo que 14 días
-          filesToDelete.add(file);
-        } else {
-          // Archivo dentro del período de retención
-          filesToKeep.add(file);
-        }
-      }
-
-      // Ordenar por fecha de modificación (más reciente primero)
-      filesToKeep.sort((a, b) => File(b.path).lastModifiedSync().compareTo(File(a.path).lastModifiedSync()));
-
-      // Eliminar los archivos marcados para eliminación
-      for (var file in filesToDelete) {
-        await File(file.path).delete();
-      }
-
+      final cierres = await _dbService.getCierresCaja();
       setState(() {
-        pdfFiles = filesToKeep;
+        _cierres = cierres;
         isLoading = false;
       });
     } catch (e) {
@@ -91,52 +58,51 @@ class _RecoveryReportState extends State<RecoveryReport> with SingleTickerProvid
         isLoading = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error al cargar archivos: $e')),
+        SnackBar(
+          content: Text('Error al cargar cierres de caja: $e'),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
 
-  // Obtener la fecha de creación formateada
-  String _getFormattedDate(FileSystemEntity file) {
+  List<Map<String, dynamic>> _getFilteredCierres() {
+    var filtered = _cierres;
+
+    // Filtrar por período
+    if (_filterPeriod == 'week') {
+      final weekAgo = DateTime.now().subtract(Duration(days: 7));
+      filtered = filtered.where((cierre) {
+        final fecha = _parseFecha(cierre['fecha_cierre']);
+        return fecha.isAfter(weekAgo);
+      }).toList();
+    } else if (_filterPeriod == 'month') {
+      final monthAgo = DateTime.now().subtract(Duration(days: 30));
+      filtered = filtered.where((cierre) {
+        final fecha = _parseFecha(cierre['fecha_cierre']);
+        return fecha.isAfter(monthAgo);
+      }).toList();
+    }
+
+    // Filtrar por búsqueda
+    if (_searchQuery.isNotEmpty) {
+      filtered = filtered.where((cierre) {
+        final fecha = cierre['fecha_cierre'].toString().toLowerCase();
+        return fecha.contains(_searchQuery.toLowerCase());
+      }).toList();
+    }
+
+    return filtered;
+  }
+
+  DateTime _parseFecha(String fechaStr) {
     try {
-      final fileStats = File(file.path).statSync();
-      final DateTime dateTime = fileStats.modified;
-      return DateFormat('dd/MM/yyyy - HH:mm').format(dateTime);
+      return DateFormat('dd/MM/yyyy HH:mm').parse(fechaStr);
     } catch (e) {
-      return 'Fecha desconocida';
+      return DateTime.now();
     }
   }
 
-  // Formatear el nombre del archivo para mostrar día de semana y fecha
-  String _formatFileName(FileSystemEntity file) {
-    try {
-      final fileStats = File(file.path).statSync();
-      final DateTime dateTime = fileStats.modified;
-      // Formato: "Lunes 22/Mar"
-      final dayOfWeek = _getDayOfWeekInSpanish(dateTime.weekday);
-      // Formatear para mostrar el nombre del mes en español con primera letra mayúscula
-      final month = DateFormat('MMM', 'es_ES').format(dateTime);
-      final capitalizedMonth = month[0].toUpperCase() + month.substring(1);
-      return "$dayOfWeek ${dateTime.day}/$capitalizedMonth";
-    } catch (e) {
-      // Si hay un error, mostrar el nombre del archivo original
-      return file.path.split('/').last;
-    }
-  }
-
-  // Extraer el número del archivo si existe
-  String _extractFileNumber(String fileName) {
-    // Buscar patrón de número entre paréntesis como (1), (2), etc.
-    final RegExp regExp = RegExp(r'\((\d+)\)');
-    final match = regExp.firstMatch(fileName);
-
-    if (match != null && match.groupCount >= 1) {
-      return match.group(1)!;
-    }
-    return "";
-  }
-
-  // Convertir número de día de la semana a texto en español
   String _getDayOfWeekInSpanish(int weekday) {
     switch (weekday) {
       case 1: return "Lunes";
@@ -150,428 +116,522 @@ class _RecoveryReportState extends State<RecoveryReport> with SingleTickerProvid
     }
   }
 
-  // Calcular los días restantes antes de la eliminación del archivo
-  int _getDaysRemainingBeforeDeletion(FileSystemEntity file) {
-    try {
-      final fileStats = File(file.path).statSync();
-      final creationDate = fileStats.modified;
-      final expirationDate = creationDate.add(Duration(days: _retentionPeriodDays));
-      final now = DateTime.now();
-
-      // Calcular la diferencia en días
-      final daysRemaining = expirationDate.difference(now).inDays;
-
-      // Asegurarse de que no devuelva valores negativos
-      return daysRemaining > 0 ? daysRemaining : 0;
-    } catch (e) {
-      return 0;
-    }
+  Color _getColorByDay(int weekday) {
+    if (weekday == 7) return Colors.red.shade700; // Domingo
+    if (weekday == 6) return Colors.orange.shade700; // Sábado
+    return Colors.teal.shade700; // Días de semana
   }
 
-  // Obtener el color para el indicador de tiempo restante
-  Color _getTimeRemainingColor(int daysRemaining) {
-    if (daysRemaining > 7) {
-      return Colors.green; // Más de 1 semana: verde
-    } else if (daysRemaining > 3) {
-      return Colors.orange; // Entre 3-7 días: naranja
-    } else {
-      return Colors.red; // Menos de 3 días: rojo
-    }
-  }
+  Future<void> _showCierreDetails(Map<String, dynamic> cierre) async {
+    final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+    final transacciones = await reporteCaja.getTransaccionesByCierre(cierre['id']);
 
-  // Obtener el tamaño del archivo
-  String _getFileSize(FileSystemEntity file) {
-    try {
-      final fileStats = File(file.path).statSync();
-      final sizeInBytes = fileStats.size;
-
-      if (sizeInBytes < 1024) {
-        return '${sizeInBytes} B';
-      } else if (sizeInBytes < 1024 * 1024) {
-        return '${(sizeInBytes / 1024).toStringAsFixed(1)} KB';
-      } else {
-        return '${(sizeInBytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-      }
-    } catch (e) {
-      return 'Tamaño desconocido';
-    }
-  }
-
-  Future<void> _printPdf(FileSystemEntity file) async {
-    // Mostrar un indicador de progreso con diseño personalizado
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (_, controller) => Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+              // Handle bar
+              Container(
+                margin: EdgeInsets.symmetric(vertical: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-              SizedBox(height: 20),
-              Text(
-                'Enviando a impresora...',
-                style: TextStyle(fontSize: 16),
+              // Header
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Detalles del Cierre',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.teal.shade800,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      cierre['fecha_cierre'],
+                      style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                    ),
+                    SizedBox(height: 16),
+                    // Resumen cards
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildSummaryCard(
+                            'Total',
+                            NumberFormat.currency(locale: 'es_CL', symbol: '\$', decimalDigits: 0)
+                                .format(cierre['total_ingresos']),
+                            Icons.attach_money,
+                            Colors.green,
+                          ),
+                        ),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: _buildSummaryCard(
+                            'Transacciones',
+                            cierre['total_transacciones'].toString(),
+                            Icons.receipt_long,
+                            Colors.blue,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 16),
+                    Divider(),
+                    SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Transacciones (${transacciones.length})',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 8),
+              // Lista de transacciones
+              Expanded(
+                child: transacciones.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No hay transacciones',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: controller,
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        itemCount: transacciones.length,
+                        itemBuilder: (context, index) {
+                          final t = transacciones[index];
+                          final isNegative = (t['valor'] as num) < 0;
+                          return Card(
+                            margin: EdgeInsets.only(bottom: 8),
+                            elevation: 1,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: BorderSide(
+                                color: isNegative ? Colors.red.shade100 : Colors.grey.shade200,
+                              ),
+                            ),
+                            child: ListTile(
+                              leading: Container(
+                                padding: EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: isNegative
+                                      ? Colors.red.shade50
+                                      : Colors.teal.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  isNegative ? Icons.remove_circle : Icons.add_circle,
+                                  color: isNegative ? Colors.red : Colors.teal,
+                                  size: 24,
+                                ),
+                              ),
+                              title: Text(
+                                t['nombre'],
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: isNegative ? Colors.red.shade800 : Colors.black87,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${t['hora']} • ${t['comprobante']}',
+                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                              ),
+                              trailing: Text(
+                                NumberFormat.currency(
+                                  locale: 'es_CL',
+                                  symbol: '\$',
+                                  decimalDigits: 0,
+                                ).format(t['valor']),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: isNegative ? Colors.red.shade700 : Colors.green.shade700,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
         ),
       ),
     );
+  }
 
-    try {
-      final pdfData = await File(file.path).readAsBytes(); // Leer el archivo PDF
-
-      // Imprimir el PDF
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async {
-          return pdfData;
-        },
-        format: PdfPageFormat(58 * PdfPageFormat.mm, double.infinity), // Tamaño de rollo de 58 mm
-      );
-
-      // Mostrar mensaje de éxito
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Documento enviado a impresora'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 2),
-        ),
-      );
-    } catch (e) {
-      // Mostrar un mensaje de error
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error al imprimir el PDF: $e'),
-          backgroundColor: Colors.red,
-          duration: Duration(seconds: 3),
-        ),
-      );
-    } finally {
-      // Cerrar el indicador de progreso
-      Navigator.of(context).pop(); // Cerrar el diálogo de carga
-    }
+  Widget _buildSummaryCard(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade700,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final filteredCierres = _getFilteredCierres();
+
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         title: Text(
-          'Reporte Semanal',
+          'Historial de Cierres',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
         ),
-        backgroundColor: Colors.teal.shade600,
-        elevation: 8,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(bottom: Radius.circular(15)),
-        ),
+        backgroundColor: Colors.teal.shade700,
+        elevation: 0,
         actions: [
           IconButton(
             icon: Icon(Icons.refresh),
             tooltip: 'Actualizar',
-            onPressed: _loadPdfFiles,
+            onPressed: _loadCierresCaja,
           ),
-          IconButton(
-            icon: Icon(Icons.info_outline),
-            tooltip: 'Información',
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  title: Text('Información', style: TextStyle(color: Colors.teal)),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Esta sección le permite ver e imprimir los reportes semanales generados por el sistema.'),
-                      SizedBox(height: 12),
-                      Text('Política de retención:', style: TextStyle(fontWeight: FontWeight.bold)),
-                      Text('• Se conservan todos los reportes de los últimos $_retentionPeriodDays días.'),
-                      Text('• Los reportes más antiguos se eliminan automáticamente.'),
-                      SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(Icons.circle, size: 12, color: Colors.green),
-                          SizedBox(width: 4),
-                          Text('Más de 7 días restantes'),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          Icon(Icons.circle, size: 12, color: Colors.orange),
-                          SizedBox(width: 4),
-                          Text('Entre 3-7 días restantes'),
-                        ],
-                      ),
-                      Row(
-                        children: [
-                          Icon(Icons.circle, size: 12, color: Colors.red),
-                          SizedBox(width: 4),
-                          Text('Menos de 3 días restantes'),
-                        ],
-                      ),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(
-                      child: Text('OK', style: TextStyle(color: Colors.teal)),
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                ),
-              );
+          PopupMenuButton<String>(
+            icon: Icon(Icons.filter_list),
+            tooltip: 'Filtrar',
+            onSelected: (value) {
+              setState(() {
+                _filterPeriod = value;
+              });
             },
+            itemBuilder: (context) => [
+              PopupMenuItem(value: 'all', child: Text('Todos')),
+              PopupMenuItem(value: 'week', child: Text('Última semana')),
+              PopupMenuItem(value: 'month', child: Text('Último mes')),
+            ],
           ),
         ],
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.teal.shade50, Colors.white],
-          ),
-        ),
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: isLoading
-              ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.teal)),
-                SizedBox(height: 20),
-                Text('Cargando reportes...', style: TextStyle(fontSize: 16, color: Colors.teal.shade700)),
-              ],
-            ),
-          )
-              : pdfFiles.isEmpty
-              ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.folder_open, size: 80, color: Colors.teal.withOpacity(0.4)),
-                SizedBox(height: 16),
-                Text(
-                  'No hay archivos PDF guardados',
-                  style: TextStyle(fontSize: 18, color: Colors.teal.shade700),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Los reportes semanales se generarán automáticamente',
-                  style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          )
-              : ListView.builder(
-            itemCount: pdfFiles.length,
-            padding: EdgeInsets.all(12),
-            itemBuilder: (context, index) {
-              final file = pdfFiles[index];
-              final originalFileName = file.path.split('/').last;
-              final formattedFileName = _formatFileName(file);
-              final fileNumber = _extractFileNumber(originalFileName);
-
-              return Card(
-                margin: EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                elevation: 4,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: InkWell(
+      body: Column(
+        children: [
+          // Barra de búsqueda
+          Container(
+            color: Colors.teal.shade700,
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: TextField(
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+              },
+              decoration: InputDecoration(
+                hintText: 'Buscar por fecha...',
+                prefixIcon: Icon(Icons.search, color: Colors.teal),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    // Opcional: mostrar previsualización o más opciones
-                    showModalBottomSheet(
-                      context: context,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                      ),
-                      builder: (context) => Container(
-                        padding: EdgeInsets.all(20),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              fileNumber.isNotEmpty
-                                  ? '$formattedFileName - Reporte #$fileNumber'
-                                  : formattedFileName,
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                            ),
-                            Text(
-                              originalFileName,
-                              style: TextStyle(fontSize: 14, color: Colors.grey),
-                              textAlign: TextAlign.center,
-                            ),
-                            SizedBox(height: 20),
-                            ListTile(
-                              leading: Icon(Icons.print, color: Colors.teal),
-                              title: Text('Imprimir reporte'),
-                              onTap: () {
-                                Navigator.pop(context);
-                                _printPdf(file);
-                              },
-                            ),
-                            ListTile(
-                              leading: Icon(Icons.remove_red_eye, color: Colors.blue),
-                              title: Text('Ver detalles'),
-                              onTap: () {
-                                Navigator.pop(context);
-                                // Implementar visualización de detalles aquí
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.teal.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
+            ),
+          ),
+          // Stats summary
+          if (!isLoading && _cierres.isNotEmpty)
+            Container(
+              margin: EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Colors.teal.shade600, Colors.teal.shade400],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.teal.shade200,
+                    blurRadius: 8,
+                    offset: Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildStatItem(
+                    'Total Cierres',
+                    filteredCierres.length.toString(),
+                    Icons.library_books,
+                  ),
+                  Container(height: 40, width: 1, color: Colors.white.withOpacity(0.3)),
+                  _buildStatItem(
+                    'Ingresos Totales',
+                    NumberFormat.compactCurrency(
+                      locale: 'es_CL',
+                      symbol: '\$',
+                      decimalDigits: 0,
+                    ).format(_cierres.fold<double>(
+                      0,
+                      (sum, c) => sum + (c['total_ingresos'] as num).toDouble(),
+                    )),
+                    Icons.monetization_on,
+                  ),
+                ],
+              ),
+            ),
+          // Lista de cierres
+          Expanded(
+            child: FadeTransition(
+              opacity: _fadeAnimation,
+              child: isLoading
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
                           ),
-                          child: Stack(
-                            alignment: Alignment.center,
+                          SizedBox(height: 20),
+                          Text(
+                            'Cargando cierres...',
+                            style: TextStyle(fontSize: 16, color: Colors.teal.shade700),
+                          ),
+                        ],
+                      ),
+                    )
+                  : filteredCierres.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                Icons.picture_as_pdf,
-                                color: Colors.red.shade700,
-                                size: 32,
+                                Icons.inbox_outlined,
+                                size: 80,
+                                color: Colors.grey.shade400,
                               ),
-                              if (fileNumber.isNotEmpty)
-                                Positioned(
-                                  right: -5,
-                                  top: -5,
-                                  child: Container(
-                                    padding: EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.teal,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Text(
-                                      fileNumber,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
+                              SizedBox(height: 16),
+                              Text(
+                                _searchQuery.isNotEmpty || _filterPeriod != 'all'
+                                    ? 'No se encontraron cierres'
+                                    : 'No hay cierres de caja registrados',
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.grey.shade600,
                                 ),
+                              ),
+                              SizedBox(height: 8),
+                              Text(
+                                'Los cierres se guardarán automáticamente',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
                             ],
                           ),
-                        ),
-                        SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      formattedFileName,
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  if (fileNumber.isNotEmpty)
-                                    Container(
-                                      margin: EdgeInsets.only(left: 4),
-                                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: Colors.teal.shade100,
-                                        borderRadius: BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        '#$fileNumber',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.teal.shade800,
+                        )
+                      : ListView.builder(
+                          itemCount: filteredCierres.length,
+                          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          itemBuilder: (context, index) {
+                            final cierre = filteredCierres[index];
+                            final fecha = _parseFecha(cierre['fecha_cierre']);
+                            final dayOfWeek = _getDayOfWeekInSpanish(fecha.weekday);
+                            final dayColor = _getColorByDay(fecha.weekday);
+
+                            return Card(
+                              margin: EdgeInsets.only(bottom: 12),
+                              elevation: 2,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(16),
+                                onTap: () => _showCierreDetails(cierre),
+                                child: Padding(
+                                  padding: EdgeInsets.all(16),
+                                  child: Row(
+                                    children: [
+                                      // Día de la semana indicator
+                                      Container(
+                                        width: 60,
+                                        height: 60,
+                                        decoration: BoxDecoration(
+                                          color: dayColor.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Text(
+                                              DateFormat('dd').format(fecha),
+                                              style: TextStyle(
+                                                fontSize: 24,
+                                                fontWeight: FontWeight.bold,
+                                                color: dayColor,
+                                              ),
+                                            ),
+                                            Text(
+                                              DateFormat('MMM', 'es_ES')
+                                                  .format(fecha)
+                                                  .toUpperCase(),
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: dayColor,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                    ),
-                                ],
-                              ),
-                              SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Icon(Icons.timer, size: 14, color:
-                                  _getTimeRemainingColor(_getDaysRemainingBeforeDeletion(file))),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    'Se elimina en ${_getDaysRemainingBeforeDeletion(file)} días',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: _getTimeRemainingColor(_getDaysRemainingBeforeDeletion(file)),
-                                    ),
+                                      SizedBox(width: 16),
+                                      // Información del cierre
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              dayOfWeek,
+                                              style: TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.grey.shade800,
+                                              ),
+                                            ),
+                                            SizedBox(height: 4),
+                                            Row(
+                                              children: [
+                                                Icon(Icons.access_time, size: 14, color: Colors.grey),
+                                                SizedBox(width: 4),
+                                                Text(
+                                                  DateFormat('HH:mm').format(fecha),
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    color: Colors.grey.shade600,
+                                                  ),
+                                                ),
+                                                SizedBox(width: 16),
+                                                Icon(Icons.receipt, size: 14, color: Colors.grey),
+                                                SizedBox(width: 4),
+                                                Text(
+                                                  '${cierre['total_transacciones']} trans.',
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    color: Colors.grey.shade600,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            SizedBox(height: 8),
+                                            Text(
+                                              NumberFormat.currency(
+                                                locale: 'es_CL',
+                                                symbol: '\$',
+                                                decimalDigits: 0,
+                                              ).format(cierre['total_ingresos']),
+                                              style: TextStyle(
+                                                fontSize: 20,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.green.shade700,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      // Ícono de detalles
+                                      Icon(
+                                        Icons.chevron_right,
+                                        color: Colors.grey.shade400,
+                                        size: 28,
+                                      ),
+                                    ],
                                   ),
-                                ],
+                                ),
                               ),
-                              SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Icon(Icons.access_time, size: 14, color: Colors.grey),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    _getFormattedDate(file),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              SizedBox(height: 2),
-                              Row(
-                                children: [
-                                  Icon(Icons.data_usage, size: 14, color: Colors.grey),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    _getFileSize(file),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
-                        IconButton(
-                          icon: Icon(Icons.print, color: Colors.teal),
-                          tooltip: 'Imprimir',
-                          onPressed: () => _printPdf(file),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: Colors.white, size: 28),
+        SizedBox(height: 8),
+        Text(
+          value,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
           ),
         ),
-      ),
+        SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.9),
+            fontSize: 12,
+          ),
+        ),
+      ],
     );
   }
 }

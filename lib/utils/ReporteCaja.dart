@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // Para formatear fechas y horas
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+import 'package:intl/intl.dart';
+import '../services/database_service.dart';
 
 class ReporteCaja extends ChangeNotifier {
+  final DatabaseService _dbService = DatabaseService();
   Map<String, List<Map<String, dynamic>>> _transacciones = {};
   double _totalIngresos = 0.0;
   bool _isAscending = true;
@@ -14,113 +14,155 @@ class ReporteCaja extends ChangeNotifier {
   bool get isAscending => _isAscending;
 
   ReporteCaja() {
-    loadTransactions(); // Cargar transacciones al iniciar
+    loadTransactions();
   }
 
-  void receiveData(String nombrePasaje, double valor, String comprobante) {
+  void receiveData(String nombrePasaje, double valor, String comprobante) async {
     String fecha = DateFormat('dd/MM/yyyy').format(DateTime.now());
-    String dia = DateFormat('dd').format(DateTime.now()); // Obtener el día
-    String mes = DateFormat('MM').format(DateTime.now()); // Obtener el mes
+    String dia = DateFormat('dd').format(DateTime.now());
+    String mes = DateFormat('MM').format(DateTime.now());
     String hora = DateFormat('HH:mm').format(DateTime.now());
-    String id = DateTime.now().millisecondsSinceEpoch.toString();
 
+    // Insertar en la base de datos
+    await _dbService.insertTransaccion({
+      'fecha': fecha,
+      'dia': dia,
+      'mes': mes,
+      'hora': hora,
+      'nombre_pasaje': nombrePasaje,
+      'valor': valor,
+      'comprobante': comprobante,
+    });
+
+    // Actualizar datos en memoria
     if (!_transacciones.containsKey(fecha)) {
       _transacciones[fecha] = [];
     }
 
-    // Agregar la transacción con el número de comprobante
     _transacciones[fecha]!.add({
-      'id': id,
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
       'nombre': nombrePasaje,
       'valor': valor,
       'hora': hora,
       'comprobante': comprobante,
-      'dia': dia, // Guardar el día
-      'mes': mes, // Guardar el mes
+      'dia': dia,
+      'mes': mes,
     });
 
     _totalIngresos += valor;
-    _saveTransactions();
     notifyListeners();
   }
 
-  void receiveCargoData(String destinatario, double valor, String comprobante) {
+  void receiveCargoData(String destinatario, double valor, String comprobante) async {
     String fecha = DateFormat('dd/MM/yyyy').format(DateTime.now());
-    String dia = DateFormat('dd').format(DateTime.now()); // Obtener el día
-    String mes = DateFormat('MM').format(DateTime.now()); // Obtener el mes
+    String dia = DateFormat('dd').format(DateTime.now());
+    String mes = DateFormat('MM').format(DateTime.now());
     String hora = DateFormat('HH:mm').format(DateTime.now());
-    String id = DateTime.now().millisecondsSinceEpoch.toString();
 
+    // Insertar en la base de datos
+    await _dbService.insertTransaccion({
+      'fecha': fecha,
+      'dia': dia,
+      'mes': mes,
+      'hora': hora,
+      'nombre_pasaje': 'Cargo: $destinatario',
+      'valor': valor,
+      'comprobante': comprobante,
+    });
+
+    // Actualizar datos en memoria
     if (!_transacciones.containsKey(fecha)) {
       _transacciones[fecha] = [];
     }
 
-    // Agregar la transacción de cargo
     _transacciones[fecha]!.add({
-      'id': id,
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
       'nombre': 'Cargo: $destinatario',
       'valor': valor,
       'hora': hora,
       'comprobante': comprobante,
-      'dia': dia, // Guardar el día
-      'mes': mes, // Guardar el mes
+      'dia': dia,
+      'mes': mes,
     });
 
     _totalIngresos += valor;
-    _saveTransactions();
     notifyListeners();
   }
 
-  void addOfferEntries(List<double> subtotals, double total, String comprobante) {
+  void addOfferEntries(List<double> subtotals, double total, String comprobante) async {
     String fecha = DateFormat('dd/MM/yyyy').format(DateTime.now());
-    String dia = DateFormat('dd').format(DateTime.now()); // Obtener el día
-    String mes = DateFormat('MM').format(DateTime.now()); // Obtener el mes
+    String dia = DateFormat('dd').format(DateTime.now());
+    String mes = DateFormat('MM').format(DateTime.now());
+    String hora = DateFormat('HH:mm').format(DateTime.now());
+
+    // Insertar en la base de datos
+    await _dbService.insertTransaccion({
+      'fecha': fecha,
+      'dia': dia,
+      'mes': mes,
+      'hora': hora,
+      'nombre_pasaje': 'Oferta Ruta',
+      'valor': total,
+      'comprobante': comprobante,
+    });
+
+    // Actualizar datos en memoria
     if (!_transacciones.containsKey(fecha)) {
       _transacciones[fecha] = [];
     }
 
-    String id = DateTime.now().millisecondsSinceEpoch.toString();
     _transacciones[fecha]!.add({
-      'id': id,
+      'id': DateTime.now().millisecondsSinceEpoch.toString(),
       'nombre': 'Oferta Ruta',
       'valor': total,
-      'hora': DateFormat('HH:mm').format(DateTime.now()),
+      'hora': hora,
       'subtotals': subtotals,
       'comprobante': comprobante,
-      'dia': dia, // Guardar el día
-      'mes': mes, // Guardar el mes
+      'dia': dia,
+      'mes': mes,
     });
 
     _totalIngresos += total;
-    _saveTransactions();
     notifyListeners();
   }
 
-  void cancelTransaction() {
+  void cancelTransaction() async {
     if (_transacciones.isNotEmpty) {
       final lastDate = _transacciones.keys.last;
       if (_transacciones[lastDate]!.isNotEmpty) {
-        final lastTransaction = _transacciones[lastDate]!.last; // Obtener la última transacción
+        final lastTransaction = _transacciones[lastDate]!.last;
         double lastValue = lastTransaction['valor'];
 
-        // Crear la nueva transacción con valor negativo
+        String fecha = DateFormat('dd/MM/yyyy').format(DateTime.now());
+        String dia = lastTransaction['dia'];
+        String mes = lastTransaction['mes'];
+        String hora = DateFormat('HH:mm').format(DateTime.now());
+
+        // Insertar anulación en la base de datos
+        await _dbService.insertTransaccion({
+          'fecha': fecha,
+          'dia': dia,
+          'mes': mes,
+          'hora': hora,
+          'nombre_pasaje': 'Anulación: ${lastTransaction['nombre']}',
+          'valor': -lastValue,
+          'comprobante': lastTransaction['comprobante'],
+        });
+
+        // Actualizar datos en memoria
         Map<String, dynamic> reversedTransaction = {
-          'id': DateTime.now().millisecondsSinceEpoch.toString(), // Nuevo ID
-          'nombre': 'Anulación: ${lastTransaction['nombre']}', // Indicar que es una anulación
-          'valor': -lastValue, // Valor negativo
-          'hora': DateFormat('HH:mm').format(DateTime.now()), // Hora actual
-          'comprobante': lastTransaction['comprobante'], // Usar el mismo comprobante
-          'dia': lastTransaction['dia'], // Usar el mismo día
-          'mes': lastTransaction['mes'], // Usar el mismo mes
+          'id': DateTime.now().millisecondsSinceEpoch.toString(),
+          'nombre': 'Anulación: ${lastTransaction['nombre']}',
+          'valor': -lastValue,
+          'hora': hora,
+          'comprobante': lastTransaction['comprobante'],
+          'dia': dia,
+          'mes': mes,
         };
 
-        // Añadir la transacción de anulación
         _transacciones[lastDate]!.add(reversedTransaction);
+        _totalIngresos += reversedTransaction['valor'];
 
-        // Ajustar el total restando el valor anulado
-        _totalIngresos += reversedTransaction['valor']; // Esto restará porque el valor es negativo
-
-        _saveTransactions();
         notifyListeners();
       }
     }
@@ -130,67 +172,85 @@ class ReporteCaja extends ChangeNotifier {
     return NumberFormat("#,##0", "es_ES").format(value);
   }
 
-  void clearTransactions() {
+  void clearTransactions() async {
+    // Crear cierre de caja antes de limpiar
+    if (_transacciones.isNotEmpty) {
+      final resumen = await _dbService.getResumenTransacciones();
+      await _dbService.createCierreCaja(
+        fechaCierre: DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()),
+        totalIngresos: resumen['total_ingresos'] ?? 0.0,
+        totalTransacciones: resumen['total_transacciones'] ?? 0,
+      );
+    }
+
+    // Limpiar datos en memoria
     _transacciones.clear();
     _totalIngresos = 0.0;
-    _saveTransactions();
     notifyListeners();
   }
 
-  void toggleOrder() {
+  void toggleOrder() async {
     _isAscending = !_isAscending;
-    _saveOrderPreference();
+    await _dbService.setConfiguracion('isAscending', _isAscending.toString(), tipo: 'bool');
     notifyListeners();
   }
 
   bool hasActiveTransactions() {
-    // Verificar si hay transacciones del día actual que no sean anulaciones
     DateTime today = DateTime.now();
     String todayDay = DateFormat('dd').format(today);
     String todayMonth = DateFormat('MM').format(today);
 
     var todayTransactions = getOrderedTransactions().where((t) =>
-    t['dia'] == todayDay && t['mes'] == todayMonth &&
+        t['dia'] == todayDay &&
+        t['mes'] == todayMonth &&
         !t['nombre'].toString().startsWith('Anulación:')
     ).toList();
 
     return todayTransactions.isNotEmpty;
   }
 
-  Future<void> _saveOrderPreference() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isAscending', _isAscending);
-  }
-
   List<Map<String, dynamic>> getOrderedTransactions() {
     var allTransactions = _transacciones.entries.expand((entry) => entry.value).toList();
 
-    // Ordenar las transacciones según el estado de _isAscending
-    allTransactions.sort((a, b) => _isAscending ? a['id'].compareTo(b['id']) : b['id'].compareTo(a['id']));
+    allTransactions.sort((a, b) => _isAscending
+        ? a['id'].compareTo(b['id'])
+        : b['id'].compareTo(a['id']));
     return allTransactions;
   }
 
-  Future<void> _saveTransactions() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('transactions', jsonEncode(_transacciones));
-    await prefs.setDouble('totalIngresos', _totalIngresos); // Guardar también el total de ingresos
-  }
-
   Future<void> loadTransactions() async {
-    final prefs = await SharedPreferences.getInstance();
-    String? transactionsJson = prefs.getString('transactions');
-    if (transactionsJson != null) {
-      Map<String, dynamic> decodedJson = jsonDecode(transactionsJson);
-      _transacciones = decodedJson.map((key, value) => MapEntry(key, List<Map<String, dynamic>>.from(value)));
+    // Cargar configuración de orden
+    _isAscending = await _dbService.getConfiguracionBool('isAscending', defaultValue: true);
 
-      // Cargar el total de ingresos guardado o recalcularlo si no está disponible
-      _totalIngresos = prefs.getDouble('totalIngresos') ?? _recalculateTotal();
+    // Cargar transacciones sin cierre desde la base de datos
+    final transaccionesDB = await _dbService.getTransaccionesSinCierre();
 
-      notifyListeners();
+    _transacciones.clear();
+    _totalIngresos = 0.0;
+
+    for (var transaccion in transaccionesDB) {
+      String fecha = transaccion['fecha'] as String;
+
+      if (!_transacciones.containsKey(fecha)) {
+        _transacciones[fecha] = [];
+      }
+
+      _transacciones[fecha]!.add({
+        'id': transaccion['id'].toString(),
+        'nombre': transaccion['nombre_pasaje'],
+        'valor': transaccion['valor'],
+        'hora': transaccion['hora'],
+        'comprobante': transaccion['comprobante'],
+        'dia': transaccion['dia'],
+        'mes': transaccion['mes'],
+      });
+
+      _totalIngresos += (transaccion['valor'] as num).toDouble();
     }
+
+    notifyListeners();
   }
 
-  // Método para recalcular el total basado en todas las transacciones
   double _recalculateTotal() {
     double total = 0.0;
     for (var transactions in _transacciones.values) {
@@ -199,5 +259,29 @@ class ReporteCaja extends ChangeNotifier {
       }
     }
     return total;
+  }
+
+  // Nuevos métodos para trabajar con cierres de caja
+
+  Future<List<Map<String, dynamic>>> getCierresCaja({int? limit}) async {
+    return await _dbService.getCierresCaja(limit: limit);
+  }
+
+  Future<List<Map<String, dynamic>>> getTransaccionesByCierre(int cierreId) async {
+    final transaccionesDB = await _dbService.getTransacciones(cierreId: cierreId);
+
+    return transaccionesDB.map((t) => {
+      'id': t['id'].toString(),
+      'nombre': t['nombre_pasaje'],
+      'valor': t['valor'],
+      'hora': t['hora'],
+      'comprobante': t['comprobante'],
+      'dia': t['dia'],
+      'mes': t['mes'],
+    }).toList();
+  }
+
+  Future<Map<String, dynamic>> getResumenCierre(int cierreId) async {
+    return await _dbService.getResumenTransacciones(cierreId: cierreId);
   }
 }
