@@ -69,31 +69,19 @@ class GenerateTicket {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
-              // Logo
-              pw.Image(
+              // Header con logo y comprobante
+              PdfTicketComponents.buildHeader(
                 pw.MemoryImage(_cachedAssets['logo']!),
-                width: 100,
-                height: 80,
+                ticketId,
               ),
               pw.SizedBox(height: 10),
 
               // Indicador de reimpresión si aplica
               if (isReprint)
-                pw.Container(
-                  padding: pw.EdgeInsets.symmetric(vertical: 2, horizontal: 5),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(width: 1, color: PdfColors.black),
-                    color: PdfColors.grey200,
-                  ),
-                  child: pw.Text(
-                    'REIMPRESIÓN',
-                    style: pw.TextStyle(
-                      fontSize: 10,
-                      fontWeight: pw.FontWeight.bold,
-                      fontStyle: pw.FontStyle.italic,
-                    ),
-                  ),
-                ),
+                PdfTicketComponents.buildReprintIndicator(),
+
+              if (isReprint)
+                pw.SizedBox(height: 10),
 
               // Tipo de ticket y título
               pw.Text(

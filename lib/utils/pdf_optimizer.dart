@@ -83,21 +83,21 @@ class PdfOptimizer {
 /// Componentes reutilizables para generar el contenido de los tickets PDF.
 class PdfTicketComponents {
   /// Cabecera con logo y número de comprobante.
+  /// Logo a la izquierda, comprobante a la derecha
   static pw.Widget buildHeader(pw.MemoryImage logoImage, String ticketId) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
         // Logo a la izquierda
         pw.Container(
-          width: 100,
+          width: 120,
           child: pw.Image(logoImage),
         ),
-        // Espacio flexible
-        pw.Spacer(),
-        // Caja de comprobante
+        // Caja de comprobante a la derecha
         pw.Container(
-          width: 80,
-          padding: pw.EdgeInsets.all(4),
+          width: 90,
+          padding: pw.EdgeInsets.all(5),
           decoration: pw.BoxDecoration(border: pw.Border.all(width: 1.5)),
           child: pw.Column(
             mainAxisAlignment: pw.MainAxisAlignment.center,
@@ -113,10 +113,10 @@ class PdfTicketComponents {
                 style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
                 textAlign: pw.TextAlign.center,
               ),
-              pw.SizedBox(height: 3),
+              pw.SizedBox(height: 4),
               pw.Text(
                 'N° $ticketId',
-                style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
                 textAlign: pw.TextAlign.center,
               ),
             ],

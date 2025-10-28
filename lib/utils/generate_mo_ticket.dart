@@ -169,11 +169,16 @@ class MoTicketGenerator {
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
               // Use our optimized header component
-              PdfTicketComponents.buildHeader(_optimizer.getLogoImage(),comprobante),
+              PdfTicketComponents.buildHeader(_optimizer.getLogoImage(), comprobante),
               pw.SizedBox(height: 5),
 
               // Add reprint indicator if needed
               if (isReprint)
+                PdfTicketComponents.buildReprintIndicator(),
+
+              if (isReprint)
+                pw.SizedBox(height: 5),
+
               // Simplified title
               pw.Text('Oferta en Ruta',
                 style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),

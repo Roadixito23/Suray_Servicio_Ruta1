@@ -55,56 +55,17 @@ class PdfGenerator {
               mainAxisAlignment: pw.MainAxisAlignment.start,
               crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                // Reemplazar el método buildHeader con una versión personalizada
-                // donde el comprobante está alineado a la derecha
-                pw.Row(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    // Logo a la izquierda (50% del ancho)
-                    pw.Container(
-                        width: format.width * 0.5,
-                        child: pw.Image(logoImage)
-                    ),
-
-                    // Espacio flexible para empujar el comprobante a la derecha
-                    pw.Spacer(),
-
-                    // Comprobante a la derecha, pegado al margen
-                    pw.Container(
-                      width: format.width * 0.4,
-                      padding: pw.EdgeInsets.all(4),
-                      decoration: pw.BoxDecoration(border: pw.Border.all(width: 1.5)),
-                      child: pw.Column(
-                        mainAxisAlignment: pw.MainAxisAlignment.center,
-                        crossAxisAlignment: pw.CrossAxisAlignment.center,
-                        children: [
-                          pw.Text(
-                            'COMPROBANTE DE',
-                            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                          pw.Text(
-                            'PAGO EN BUS',
-                            style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                          pw.SizedBox(height: 3),
-                          pw.Text(
-                            'N° $ticketIdWithComprobante',
-                            style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                // Usar el header mejorado del PdfTicketComponents
+                PdfTicketComponents.buildHeader(logoImage, ticketIdWithComprobante),
 
                 pw.SizedBox(height: 10),
 
                 // Only add reprint indicator if needed (simplified)
                 if (isReprint)
-                  PdfTicketComponents.buildHeader(logoImage,comprobanteModel as String),
+                  PdfTicketComponents.buildReprintIndicator(),
+
+                if (isReprint)
+                  pw.SizedBox(height: 10),
 
                 // Title based on switch state (simplified)
                 pw.Text(
