@@ -109,7 +109,9 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
   Future<void> _preloadGenerateTicket() async {
     try {
-      final generateTicket = GenerateTicket();
+      final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
+      final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+      final generateTicket = GenerateTicket(comprobanteModel, reporteCaja);
       await generateTicket.preloadResources();
       return;
     } catch (e) {
