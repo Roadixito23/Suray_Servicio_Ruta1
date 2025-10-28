@@ -17,6 +17,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/generate_mo_ticket.dart';
 import '../models/ComprobanteModel.dart';
 import '../utils/pdf_optimizer.dart';
+import '../utils/generateCargo_Ticket.dart';
 
 // Importar widgets personalizados
 import 'home/widgets/widgets.dart';
@@ -323,6 +324,51 @@ class _HomeState extends State<Home> {
 
   IconData _getButtonIcon(String buttonName, IconData defaultIcon) {
     return _buttonIcons[buttonName] ?? defaultIcon;
+  }
+
+  IconData _getIconFromString(String iconString) {
+    // Convert icon string to IconData
+    // This is a simple implementation that handles common Material Icons
+    switch (iconString.toLowerCase()) {
+      case 'home':
+        return Icons.home;
+      case 'settings':
+        return Icons.settings;
+      case 'person':
+        return Icons.person;
+      case 'favorite':
+        return Icons.favorite;
+      case 'star':
+        return Icons.star;
+      case 'search':
+        return Icons.search;
+      case 'menu':
+        return Icons.menu;
+      case 'add':
+        return Icons.add;
+      case 'remove':
+        return Icons.remove;
+      case 'edit':
+        return Icons.edit;
+      case 'delete':
+        return Icons.delete;
+      case 'check':
+        return Icons.check;
+      case 'close':
+        return Icons.close;
+      case 'arrow_back':
+        return Icons.arrow_back;
+      case 'arrow_forward':
+        return Icons.arrow_forward;
+      case 'calendar_today':
+        return Icons.calendar_today;
+      case 'receipt':
+        return Icons.receipt;
+      case 'print':
+        return Icons.print;
+      default:
+        return Icons.help_outline; // Default fallback icon
+    }
   }
 
   Future<void> _loadDisplayPreferences() async {
@@ -1050,10 +1096,7 @@ class _HomeState extends State<Home> {
     pdfOptimizer.clearCache();
     _resourcesPreloaded = false;
 
-    // También podemos liberar otras cachés si es necesario
-    if (generateTicket.resourcesPreloaded) {
-      generateTicket.optimizer.clearCache();
-      generateTicket.resourcesPreloaded = false;
-    }
+    // The GenerateTicket class manages its own resources internally
+    // We only need to reset the local flag
   }
 }
