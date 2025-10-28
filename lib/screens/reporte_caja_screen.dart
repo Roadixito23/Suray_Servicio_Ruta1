@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'reporte_recovery.dart';
+import 'historial_cierres_screen.dart';
 import '../utils/pdfReport_generator.dart';
 import '../utils/ReporteCaja.dart';
 import 'package:printing/printing.dart';
+import '../services/sync_service.dart';
 
 class ReporteCajaScreen extends StatefulWidget {
   @override
@@ -48,6 +51,152 @@ class _ReporteCajaScreenState extends State<ReporteCajaScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error al generar e imprimir el PDF: $e')),
       );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// Abre la configuración de WiFi del dispositivo
+  Future<void> _openWiFiSettings() async {
+    try {
+      final uri = Uri.parse('app-settings:');
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo abrir configuración de WiFi')),
+        );
+      }
+    }
+  }
+
+  /// Muestra diálogo de advertencia cuando no hay WiFi
+  Future<bool> _mostrarDialogoSinWiFi() async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: Icon(Icons.wifi_off, color: Colors.orange, size: 48),
+        title: Text(
+          'Sin Conexión WiFi',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'No estás conectado a WiFi.',
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 8),
+            Text(
+              'El cierre se guardará localmente pero no se sincronizará con el servidor.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            icon: Icon(Icons.settings),
+            label: Text('Conectar WiFi'),
+            onPressed: () {
+              Navigator.pop(context, false);
+              _openWiFiSettings();
+            },
+          ),
+          ElevatedButton.icon(
+            icon: Icon(Icons.check),
+            label: Text('Continuar sin WiFi'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
+  }
+
+  /// Muestra un SnackBar con el resultado de la operación
+  void _mostrarSnackBar(String mensaje, Color color) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(mensaje),
+        backgroundColor: color,
+        duration: Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// Proceso completo de cierre de caja con sincronización
+  Future<void> _cerrarCaja() async {
+    // 1. Verificar conexión WiFi
+    final hasWifi = await SyncService.isConnectedToWiFi();
+
+    bool intentarSync = hasWifi;
+
+    // 2. Si no hay WiFi, mostrar diálogo de advertencia
+    if (!hasWifi) {
+      final shouldContinue = await _mostrarDialogoSinWiFi();
+      if (!shouldContinue) {
+        return; // Usuario canceló o fue a configuración
+      }
+    }
+
+    // 3. Mostrar indicador de carga
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+
+      // 4. Generar PDF primero
+      await _generatePdfReport();
+
+      // 5. Crear cierre en SQLite
+      final cierreId = await reporteCaja.clearTransactions();
+
+      if (cierreId == null) {
+        _mostrarSnackBar('No hay transacciones para cerrar', Colors.orange);
+        return;
+      }
+
+      // 6. Si hay WiFi, intentar sincronizar
+      if (intentarSync) {
+        final syncService = SyncService();
+        final result = await syncService.syncCierre(cierreId);
+
+        if (result.success) {
+          _mostrarSnackBar(
+            '✅ Cierre #$cierreId sincronizado correctamente',
+            Colors.green,
+          );
+        } else {
+          _mostrarSnackBar(
+            '⚠️ Cierre guardado localmente. Se sincronizará más tarde.',
+            Colors.orange,
+          );
+        }
+      } else {
+        _mostrarSnackBar(
+          'ℹ️ Cierre guardado. Sincroniza cuando tengas conexión.',
+          Colors.blue,
+        );
+      }
+    } catch (e) {
+      _mostrarSnackBar('❌ Error al crear cierre: $e', Colors.red);
     } finally {
       setState(() {
         _isLoading = false;
@@ -152,6 +301,17 @@ class _ReporteCajaScreenState extends State<ReporteCajaScreen> {
             icon: Icon(reporteCaja.isAscending ? Icons.arrow_upward : Icons.arrow_downward),
             onPressed: () {
               reporteCaja.toggleOrder();
+            },
+          ),
+          // Botón para historial de cierres con sincronización
+          IconButton(
+            icon: Icon(Icons.cloud_sync),
+            tooltip: 'Historial de Cierres',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => HistorialCierresScreen()),
+              );
             },
           ),
           // Botón para recuperar reportes anteriores
@@ -343,10 +503,7 @@ class _ReporteCajaScreenState extends State<ReporteCajaScreen> {
                     'Cerrar Caja',
                     style: TextStyle(fontFamily: 'Hemiheads', fontSize: 18),
                   ),
-                  onPressed: _isLoading || orderedTransactions.isEmpty ? null : () async {
-                    await _generatePdfReport();
-                    reporteCaja.clearTransactions();
-                  },
+                  onPressed: _isLoading || orderedTransactions.isEmpty ? null : _cerrarCaja,
                   style: ElevatedButton.styleFrom(
                     foregroundColor: Colors.white,
                     backgroundColor: Colors.greenAccent[700],

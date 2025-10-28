@@ -25,7 +25,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -57,7 +57,11 @@ class DatabaseService {
         total_ingresos REAL NOT NULL,
         total_transacciones INTEGER NOT NULL,
         pdf_path TEXT,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        sincronizado INTEGER DEFAULT 0,
+        server_id INTEGER,
+        ultimo_intento_sync TEXT,
+        error_sync TEXT
       )
     ''');
 
@@ -210,7 +214,15 @@ class DatabaseService {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // Aquí se manejarán futuras migraciones de esquema
+    // Migración de versión 1 a 2: Agregar campos de sincronización
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE cierres_caja ADD COLUMN sincronizado INTEGER DEFAULT 0');
+      await db.execute('ALTER TABLE cierres_caja ADD COLUMN server_id INTEGER');
+      await db.execute('ALTER TABLE cierres_caja ADD COLUMN ultimo_intento_sync TEXT');
+      await db.execute('ALTER TABLE cierres_caja ADD COLUMN error_sync TEXT');
+
+      print('✅ Base de datos migrada a versión 2: campos de sincronización agregados');
+    }
   }
 
   // ==================== MÉTODOS PARA TRANSACCIONES ====================
@@ -357,6 +369,70 @@ class DatabaseService {
       cierre,
       where: 'id = ?',
       whereArgs: [id],
+    );
+  }
+
+  // ==================== MÉTODOS PARA SINCRONIZACIÓN ====================
+
+  /// Obtiene todos los cierres que no han sido sincronizados con el servidor
+  Future<List<Map<String, dynamic>>> getCierresPendientesSincronizacion() async {
+    final db = await database;
+    return await db.query(
+      'cierres_caja',
+      where: 'sincronizado = ?',
+      whereArgs: [0],
+      orderBy: 'fecha_cierre ASC',
+    );
+  }
+
+  /// Marca un cierre como sincronizado correctamente con el servidor
+  Future<int> marcarCierreComoSincronizado({
+    required int localId,
+    required int serverId,
+  }) async {
+    final db = await database;
+    return await db.update(
+      'cierres_caja',
+      {
+        'sincronizado': 1,
+        'server_id': serverId,
+        'ultimo_intento_sync': DateTime.now().toIso8601String(),
+        'error_sync': null,
+      },
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  /// Marca un cierre con error de sincronización
+  Future<int> marcarErrorSincronizacion({
+    required int localId,
+    required String errorMessage,
+  }) async {
+    final db = await database;
+    return await db.update(
+      'cierres_caja',
+      {
+        'sincronizado': 0,
+        'ultimo_intento_sync': DateTime.now().toIso8601String(),
+        'error_sync': errorMessage,
+      },
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+  }
+
+  /// Resetea el estado de sincronización de un cierre para reintentar
+  Future<int> resetearEstadoSincronizacion(int localId) async {
+    final db = await database;
+    return await db.update(
+      'cierres_caja',
+      {
+        'sincronizado': 0,
+        'error_sync': null,
+      },
+      where: 'id = ?',
+      whereArgs: [localId],
     );
   }
 

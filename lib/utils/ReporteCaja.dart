@@ -172,11 +172,13 @@ class ReporteCaja extends ChangeNotifier {
     return NumberFormat("#,##0", "es_ES").format(value);
   }
 
-  void clearTransactions() async {
+  Future<int?> clearTransactions() async {
+    int? cierreId;
+
     // Crear cierre de caja antes de limpiar
     if (_transacciones.isNotEmpty) {
       final resumen = await _dbService.getResumenTransacciones();
-      await _dbService.createCierreCaja(
+      cierreId = await _dbService.createCierreCaja(
         fechaCierre: DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()),
         totalIngresos: resumen['total_ingresos'] ?? 0.0,
         totalTransacciones: resumen['total_transacciones'] ?? 0,
@@ -187,6 +189,8 @@ class ReporteCaja extends ChangeNotifier {
     _transacciones.clear();
     _totalIngresos = 0.0;
     notifyListeners();
+
+    return cierreId;
   }
 
   void toggleOrder() async {
