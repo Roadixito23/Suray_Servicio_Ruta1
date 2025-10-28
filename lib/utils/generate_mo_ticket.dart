@@ -152,12 +152,18 @@ class MoTicketGenerator {
     final pdfWidth = 58 * PdfPageFormat.mm;
 
     // Obtener la fecha y hora actual
-    String currentDate = DateFormat('dd/MM/yyyy').format(DateTime.now());
-    String currentTime = DateFormat('HH:mm:ss').format(DateTime.now());
+    final now = DateTime.now();
+    String currentDate = DateFormat('dd/MM/yy').format(now);
+    String currentTime = DateFormat('HH:mm:ss').format(now);
 
     // Use NumberFormat just once
     final formatter = NumberFormat('#,##0', 'es_CL');
     final formattedTotal = formatter.format(total);
+
+    // Determinar el título según el día (domingo o lunes-sábado)
+    final String tarifaTitulo = isSwitchOn
+        ? 'TARIFA DOMINGO O FERIADO'
+        : 'TARIFA LUNES A SÁBADO';
 
     // Crear la página del PDF con formato para rollo de 58mm
     doc.addPage(
@@ -169,51 +175,168 @@ class MoTicketGenerator {
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             children: [
               // Use our optimized header component
-              PdfTicketComponents.buildHeader(_optimizer.getLogoImage(),comprobante),
-              pw.SizedBox(height: 5),
+              PdfTicketComponents.buildHeader(_optimizer.getLogoImage(), comprobante),
+              pw.SizedBox(height: 8),
 
               // Add reprint indicator if needed
-              if (isReprint)
-              // Simplified title
-              pw.Text('Oferta en Ruta',
-                style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+              if (isReprint) ...[
+                pw.Container(
+                  padding: pw.EdgeInsets.symmetric(vertical: 2, horizontal: 5),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(width: 1, color: PdfColors.black),
+                    color: PdfColors.grey200,
+                  ),
+                  child: pw.Text(
+                    'REIMPRESIÓN',
+                    style: pw.TextStyle(
+                      fontSize: 10,
+                      fontWeight: pw.FontWeight.bold,
+                      fontStyle: pw.FontStyle.italic,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(height: 8),
+              ],
+
+              // Título de tarifa en negrita
+              pw.Text(
+                tarifaTitulo,
+                style: pw.TextStyle(
+                  fontSize: 13,
+                  fontWeight: pw.FontWeight.bold,
+                ),
                 textAlign: pw.TextAlign.center,
               ),
-              pw.SizedBox(height: 5),
+              pw.SizedBox(height: 6),
 
-              // Simplified table using our components
-              PdfTicketComponents.buildSimplifiedTable(offerEntries),
+              // Subtitle "Oferta en Ruta"
+              pw.Text(
+                'Oferta en Ruta',
+                style: pw.TextStyle(fontSize: 11),
+                textAlign: pw.TextAlign.center,
+              ),
+              pw.SizedBox(height: 8),
 
-              pw.SizedBox(height: 5),
+              // Tabla con cantidad, precio unitario y subtotal
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.black, width: 0.5),
+                columnWidths: {
+                  0: pw.FlexColumnWidth(2),
+                  1: pw.FlexColumnWidth(2),
+                  2: pw.FlexColumnWidth(2),
+                },
+                children: [
+                  // Encabezado de tabla
+                  pw.TableRow(
+                    decoration: pw.BoxDecoration(color: PdfColors.grey300),
+                    children: [
+                      pw.Padding(
+                        padding: pw.EdgeInsets.all(3),
+                        child: pw.Text(
+                          'Cantidad',
+                          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                          textAlign: pw.TextAlign.center,
+                        ),
+                      ),
+                      pw.Padding(
+                        padding: pw.EdgeInsets.all(3),
+                        child: pw.Text(
+                          'Precio',
+                          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                          textAlign: pw.TextAlign.center,
+                        ),
+                      ),
+                      pw.Padding(
+                        padding: pw.EdgeInsets.all(3),
+                        child: pw.Text(
+                          'Subtotal',
+                          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
+                          textAlign: pw.TextAlign.center,
+                        ),
+                      ),
+                    ],
+                  ),
+                  // Filas de datos
+                  ...List.generate(offerEntries.length, (index) {
+                    final entry = offerEntries[index];
+                    int quantity = int.tryParse(entry['number'] ?? '0') ?? 0;
+                    double price = double.tryParse(entry['value'] ?? '0.0') ?? 0.0;
+                    double subtotal = subtotals[index];
 
-              // Total amount
-              pw.Text('Total: \$$formattedTotal',
-                style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                    return pw.TableRow(
+                      children: [
+                        pw.Padding(
+                          padding: pw.EdgeInsets.all(3),
+                          child: pw.Text(
+                            '$quantity',
+                            style: pw.TextStyle(fontSize: 9),
+                            textAlign: pw.TextAlign.center,
+                          ),
+                        ),
+                        pw.Padding(
+                          padding: pw.EdgeInsets.all(3),
+                          child: pw.Text(
+                            '\$${formatter.format(price)}',
+                            style: pw.TextStyle(fontSize: 9),
+                            textAlign: pw.TextAlign.center,
+                          ),
+                        ),
+                        pw.Padding(
+                          padding: pw.EdgeInsets.all(3),
+                          child: pw.Text(
+                            '\$${formatter.format(subtotal)}',
+                            style: pw.TextStyle(fontSize: 9),
+                            textAlign: pw.TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+
+              pw.SizedBox(height: 8),
+
+              // Total amount in bold
+              pw.Text(
+                'Total: \$$formattedTotal',
+                style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
                 textAlign: pw.TextAlign.center,
               ),
 
-              pw.SizedBox(height: 5),
+              pw.SizedBox(height: 10),
 
-              // Validity text
-              pw.Text('Válido hora y fecha señalada',
+              // Validity text in bold
+              pw.Text(
+                'Válido hora y fecha señalada',
                 style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold),
                 textAlign: pw.TextAlign.center,
               ),
 
-              pw.SizedBox(height: 3),
+              pw.SizedBox(height: 5),
 
-              // Add reprint date if needed
-              if (isReprint) ...[
-                pw.SizedBox(height: 5),
-                pw.Text(
-                  'Reimpreso: $currentDate $currentTime',
-                  style: pw.TextStyle(fontSize: 8, fontStyle: pw.FontStyle.italic),
-                  textAlign: pw.TextAlign.center,
-                ),
-              ],
+              // Fila con hora a la izquierda y fecha a la derecha
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    currentTime,
+                    style: pw.TextStyle(fontSize: 9),
+                  ),
+                  pw.Text(
+                    currentDate,
+                    style: pw.TextStyle(fontSize: 9),
+                  ),
+                ],
+              ),
 
-              // Footer image
-              pw.Image(_optimizer.getEndImage()),
+              pw.SizedBox(height: 10),
+
+              // Footer image centrado
+              pw.Image(
+                _optimizer.getEndImage(),
+                width: 180,
+              ),
             ],
           );
         },
