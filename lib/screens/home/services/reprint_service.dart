@@ -58,22 +58,14 @@ class ReprintService {
     BuildContext context,
     Map<String, dynamic> lastTransaction,
   ) async {
-    final comprobanteModel =
-        Provider.of<ComprobanteModel>(context, listen: false);
-
     String tipo = lastTransaction['nombre'] ?? '';
     double valor = lastTransaction['valor'] ?? 0.0;
     bool switchValue = lastTransaction['switchValue'] ?? false;
 
     await generateTicket.generateTicketPdf(
-      context,
+      tipo,
       valor,
       switchValue,
-      tipo,
-      '', // Sin destinatario
-      '', // Sin teléfono
-      '', // Sin artículo
-      comprobanteModel,
       true, // Indicar que es una reimpresión
     );
   }

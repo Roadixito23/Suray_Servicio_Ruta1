@@ -31,7 +31,7 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> {
   final PdfOptimizer pdfOptimizer = PdfOptimizer();
-  final GenerateTicket generateTicket = GenerateTicket();
+  late GenerateTicket generateTicket;
   final MoTicketGenerator moTicketGenerator = MoTicketGenerator();
   late final ReprintService reprintService;
   bool _isButtonDisabled = false;
@@ -44,9 +44,6 @@ class _HomeState extends State<Home> {
   bool _isPhoneMode = true;
   bool _resourcesPreloaded = false; // Track if resources are preloaded
   final TextEditingController _offerController = TextEditingController();
-  final TextEditingController _ownerController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
-  final TextEditingController _itemController = TextEditingController();
   final FocusNode _contactFocusNode = FocusNode();
   List<Map<String, dynamic>> _appBarSlots = List.generate(8, (index) => {'isEmpty': true, 'element': null});
 
@@ -107,6 +104,11 @@ class _HomeState extends State<Home> {
   @override
   void initState() {
     super.initState();
+
+    // Inicializar GenerateTicket con los providers necesarios
+    final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
+    final reporteCaja = Provider.of<ReporteCaja>(context, listen: false);
+    generateTicket = GenerateTicket(comprobanteModel, reporteCaja);
 
     // Inicializar servicio de reimpresión
     reprintService = ReprintService(
@@ -210,9 +212,6 @@ class _HomeState extends State<Home> {
   void dispose() {
     _timer.cancel();
     _offerController.dispose();
-    _ownerController.dispose();
-    _phoneController.dispose();
-    _itemController.dispose();
     _contactFocusNode.dispose();
     super.dispose();
   }
@@ -391,15 +390,6 @@ class _HomeState extends State<Home> {
     return DateFormat('dd/MM/yyyy').format(DateTime.now());
   }
 
-  String _formatContactInfo(String value, bool isPhone) {
-    if (isPhone) {
-      if (value.length < 8) return value;
-      return '${value.substring(0, 1)} ${value.substring(1, 5)} ${value.substring(5)}';
-    } else {
-      return value;
-    }
-  }
-
   Future<String> _loadPassword() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('password') ?? '232323';
@@ -441,20 +431,15 @@ class _HomeState extends State<Home> {
     ScaffoldMessenger.of(context).showSnackBar(snackBar);
 
     try {
-      final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
       await generateTicket.generateTicketPdf(
-          context,
+          tipo,
           valor,
           _switchValue,
-          tipo,
-          _ownerController.text,
-          _formatContactInfo(_phoneController.text, _isPhoneMode),
-          _itemController.text,
-          comprobanteModel,
-          false
+          false  // isReprint
       );
 
       // Update the latest transaction
+      final comprobanteModel = Provider.of<ComprobanteModel>(context, listen: false);
       setState(() {
         _lastTransaction = {
           'nombre': tipo,
